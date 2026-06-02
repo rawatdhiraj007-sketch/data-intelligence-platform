@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DataIntel — AI-Powered Data Intelligence Platform</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a2e; }
+nav {
+  position: fixed; top: 0; width: 100%; background: white;
+  padding: 16px 60px; display: flex; justify-content: space-between;
+  align-items: center; box-shadow: 0 2px 20px rgba(0,0,0,0.08); z-index: 1000;
+}
+.logo { font-size: 1.5rem; font-weight: 800; color: #1F4E79; }
+.logo span { color: #2E75B6; }
+.nav-links a { margin-left: 30px; text-decoration: none; color: #555; font-weight: 500; }
+.nav-cta { background: #1F4E79; color: white !important; padding: 10px 24px; border-radius: 8px; font-weight: 600 !important; }
+.hero {
+  min-height: 100vh; background: linear-gradient(135deg, #0a1628 0%, #1F4E79 50%, #2E75B6 100%);
+  display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 100px 20px 60px;
+}
+.hero-content { max-width: 800px; }
+.hero-badge { display: inline-block; background: rgba(255,255,255,0.15); color: white; padding: 8px 20px; border-radius: 50px; font-size: 0.85rem; margin-bottom: 24px; border: 1px solid rgba(255,255,255,0.3); }
+.hero h1 { font-size: 3.5rem; font-weight: 800; color: white; line-height: 1.2; margin-bottom: 24px; }
+.hero h1 span { color: #64b5f6; }
+.hero p { font-size: 1.2rem; color: rgba(255,255,255,0.85); margin-bottom: 40px; line-height: 1.7; }
+.hero-buttons { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+.btn-primary { background: white; color: #1F4E79; padding: 16px 40px; border-radius: 10px; font-size: 1rem; font-weight: 700; text-decoration: none; display: inline-block; }
+.btn-secondary { background: transparent; color: white; padding: 16px 40px; border-radius: 10px; font-size: 1rem; font-weight: 600; text-decoration: none; border: 2px solid rgba(255,255,255,0.5); }
+.stats { background: white; padding: 60px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 30px; border-bottom: 1px solid #eee; }
+.stat { text-align: center; }
+.stat-number { font-size: 2.5rem; font-weight: 800; color: #1F4E79; }
+.stat-label { font-size: 0.9rem; color: #666; margin-top: 4px; }
+.section-label { color: #2E75B6; font-weight: 700; font-size: 0.85rem; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 12px; }
+.section-title { font-size: 2.2rem; font-weight: 800; margin-bottom: 20px; }
+.section-sub { font-size: 1.1rem; color: #666; max-width: 600px; margin: 0 auto 50px; }
+.problem { background: #f8f9ff; padding: 80px 60px; text-align: center; }
+.problem-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; max-width: 900px; margin: 0 auto; }
+.problem-card { background: white; padding: 30px; border-radius: 12px; border-left: 4px solid #e74c3c; text-align: left; box-shadow: 0 2px 15px rgba(0,0,0,0.06); }
+.problem-card h4 { font-size: 1rem; font-weight: 700; margin-bottom: 8px; }
+.problem-card p { font-size: 0.9rem; color: #666; line-height: 1.6; }
+.how { padding: 80px 60px; text-align: center; background: white; }
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; max-width: 900px; margin: 50px auto 0; }
+.step { text-align: center; }
+.step-number { width: 60px; height: 60px; background: linear-gradient(135deg, #1F4E79, #2E75B6); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; font-weight: 800; margin: 0 auto 20px; }
+.step h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 10px; }
+.step p { font-size: 0.9rem; color: #666; line-height: 1.6; }
+.features { background: #f8f9ff; padding: 80px 60px; text-align: center; }
+.features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; max-width: 1000px; margin: 50px auto 0; }
+.feature-card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 2px 15px rgba(0,0,0,0.06); text-align: left; }
+.feature-icon { font-size: 2rem; margin-bottom: 16px; }
+.feature-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 10px; color: #1F4E79; }
+.feature-card p { font-size: 0.88rem; color: #666; line-height: 1.6; }
+.pricing { padding: 80px 60px; text-align: center; background: white; }
+.pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; max-width: 900px; margin: 50px auto 0; }
+.pricing-card { border: 2px solid #eee; border-radius: 16px; padding: 40px 30px; text-align: center; position: relative; }
+.pricing-card.popular { border-color: #1F4E79; box-shadow: 0 10px 40px rgba(31,78,121,0.15); }
+.popular-badge { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); background: #1F4E79; color: white; padding: 6px 20px; border-radius: 50px; font-size: 0.8rem; font-weight: 700; }
+.plan-name { font-size: 1rem; font-weight: 700; color: #666; margin-bottom: 12px; }
+.plan-price { font-size: 2.8rem; font-weight: 800; color: #1F4E79; }
+.plan-price span { font-size: 1rem; font-weight: 500; color: #666; }
+.plan-desc { font-size: 0.88rem; color: #888; margin: 10px 0 24px; }
+.plan-features { list-style: none; text-align: left; margin-bottom: 30px; }
+.plan-features li { padding: 8px 0; font-size: 0.9rem; color: #444; border-bottom: 1px solid #f0f0f0; }
+.plan-features li::before { content: "✅ "; }
+.plan-btn { display: block; padding: 14px; border-radius: 10px; font-weight: 700; text-decoration: none; font-size: 0.95rem; }
+.plan-btn-outline { border: 2px solid #1F4E79; color: #1F4E79; }
+.plan-btn-filled { background: #1F4E79; color: white; }
+.comparison { background: #f8f9ff; padding: 80px 60px; text-align: center; }
+.comparison-table { max-width: 800px; margin: 50px auto 0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+.comp-row { display: grid; grid-template-columns: 2fr 1fr 1fr; }
+.comp-row.header { background: #1F4E79; color: white; font-weight: 700; }
+.comp-cell { padding: 16px 20px; border-bottom: 1px solid #eee; text-align: center; font-size: 0.9rem; }
+.comp-cell:first-child { text-align: left; }
+.comp-row:nth-child(even) { background: white; }
+.comp-row:nth-child(odd):not(.header) { background: #f8f9ff; }
+.yes { color: #27ae60; font-weight: 700; }
+.no { color: #e74c3c; }
+.cta-section { background: linear-gradient(135deg, #1F4E79, #2E75B6); padding: 80px 60px; text-align: center; }
+.cta-section h2 { font-size: 2.5rem; font-weight: 800; color: white; margin-bottom: 16px; }
+.cta-section p { font-size: 1.1rem; color: rgba(255,255,255,0.85); margin-bottom: 40px; }
+footer { background: #0a1628; color: rgba(255,255,255,0.6); padding: 40px 60px; text-align: center; font-size: 0.88rem; }
+footer strong { color: white; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">Data<span>Intel</span></div>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#how">How it Works</a>
+    <a href="#pricing">Pricing</a>
+    <a href="https://data-intelligence-platform-7p8vfpfosvduyt6ec93vpk.streamlit.app" class="nav-cta" target="_blank">Try Free</a>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="hero-content">
+    <div class="hero-badge">Now Live — No Credit Card Required</div>
+    <h1>Your Business Data.<br><span>Instant Intelligence.</span></h1>
+    <p>Upload any Excel or CSV file and get instant insights, forecasts, and reports — just like having a senior data scientist on your team. No technical skills needed.</p>
+    <div class="hero-buttons">
+      <a href="https://data-intelligence-platform-7p8vfpfosvduyt6ec93vpk.streamlit.app" class="btn-primary" target="_blank">Try It Free — Upload Your Data</a>
+      <a href="#how" class="btn-secondary">See How It Works</a>
+    </div>
+  </div>
+</section>
+
+<div class="stats">
+  <div class="stat"><div class="stat-number">3 min</div><div class="stat-label">Average analysis time</div></div>
+  <div class="stat"><div class="stat-number">₹0</div><div class="stat-label">Setup cost</div></div>
+  <div class="stat"><div class="stat-number">10+</div><div class="stat-label">Auto-generated insights</div></div>
+  <div class="stat"><div class="stat-number">100%</div><div class="stat-label">Data privacy — never stored</div></div>
+</div>
+
+<section class="problem" id="problem">
+  <div class="section-label">The Problem</div>
+  <h2 class="section-title">Every Business Has Data. Almost None Can Act On It.</h2>
+  <p class="section-sub">The tools exist — but they require expensive expertise most businesses simply don't have.</p>
+  <div class="problem-grid">
+    <div class="problem-card"><h4>Data Scientists Cost 15L+/year</h4><p>Most SMBs can't afford a full-time data scientist to analyze their business data.</p></div>
+    <div class="problem-card"><h4>Excel Has Its Limits</h4><p>Manual analysis takes days, is error-prone, and gives no forecasting or smart alerts.</p></div>
+    <div class="problem-card"><h4>BI Tools Are Too Complex</h4><p>Power BI, Tableau — built for technical users. Non-technical business owners give up fast.</p></div>
+  </div>
+</section>
+
+<section class="how" id="how">
+  <div class="section-label">How It Works</div>
+  <h2 class="section-title">3 Steps to Business Intelligence</h2>
+  <p class="section-sub">No setup. No training. No data science degree required.</p>
+  <div class="steps">
+    <div class="step"><div class="step-number">1</div><h3>Upload Your File</h3><p>Upload any Excel or CSV file — sales, inventory, HR, finance. Any format works.</p></div>
+    <div class="step"><div class="step-number">2</div><h3>Instant Analysis</h3><p>Platform automatically cleans, analyzes, and runs 10+ types of intelligence in seconds.</p></div>
+    <div class="step"><div class="step-number">3</div><h3>Get Insights</h3><p>Download a professional PDF report with forecasts, alerts, and recommendations.</p></div>
+  </div>
+</section>
+
+<section class="features" id="features">
+  <div class="section-label">Features</div>
+  <h2 class="section-title">Everything a Data Scientist Does. In 3 Minutes.</h2>
+  <p class="section-sub">10 powerful analytical modules — all automatic, all instant.</p>
+  <div class="features-grid">
+    <div class="feature-card"><div class="feature-icon">📈</div><h3>Revenue Intelligence</h3><p>Total revenue, growth trends, region-wise and product-wise breakdown.</p></div>
+    <div class="feature-card"><div class="feature-icon">📦</div><h3>Product / SKU Analysis</h3><p>Top sellers, slow movers, units sold ranking. Know what to push and what to drop.</p></div>
+    <div class="feature-card"><div class="feature-icon">💰</div><h3>Price Inconsistency Detection</h3><p>Automatically finds products billed at different prices. Catch billing errors instantly.</p></div>
+    <div class="feature-card"><div class="feature-icon">👤</div><h3>Salesperson Performance</h3><p>Revenue per person, target achievement, team comparison. Know your top performers.</p></div>
+    <div class="feature-card"><div class="feature-icon">👥</div><h3>Customer Intelligence</h3><p>Revenue by customer type, average order value. Know your best customers.</p></div>
+    <div class="feature-card"><div class="feature-icon">🔮</div><h3>6-Month Sales Forecast</h3><p>Statistical forecasting with confidence ranges. Plan budgets and inventory accurately.</p></div>
+    <div class="feature-card"><div class="feature-icon">🚨</div><h3>Smart Business Alerts</h3><p>Automatic alerts for declining revenue, slow products, underperforming salespeople.</p></div>
+    <div class="feature-card"><div class="feature-icon">💳</div><h3>Payment Intelligence</h3><p>Payment mode breakdown, cash vs digital trends. Optimize collection strategy.</p></div>
+    <div class="feature-card"><div class="feature-icon">📄</div><h3>PDF Report Generator</h3><p>Professional PDF with all insights, charts, and recommendations. Share instantly.</p></div>
+  </div>
+</section>
+
+<section class="pricing" id="pricing">
+  <div class="section-label">Pricing</div>
+  <h2 class="section-title">Simple, Transparent Pricing</h2>
+  <p class="section-sub">Start free. Pay only when you get value. Cancel anytime.</p>
+  <div class="pricing-grid">
+    <div class="pricing-card">
+      <div class="plan-name">STARTER</div>
+      <div class="plan-price">999<span>/month</span></div>
+      <div class="plan-desc">Perfect for small businesses</div>
+      <ul class="plan-features">
+        <li>10 analyses per month</li>
+        <li>Sales Intelligence module</li>
+        <li>PDF report download</li>
+        <li>6-month forecasting</li>
+        <li>Email support</li>
+      </ul>
+      <a href="https://data-intelligence-platform-7p8vfpfosvduyt6ec93vpk.streamlit.app" class="plan-btn plan-btn-outline" target="_blank">Get Started Free</a>
+    </div>
+    <div class="pricing-card popular">
+      <div class="popular-badge">Most Popular</div>
+      <div class="plan-name">PROFESSIONAL</div>
+      <div class="plan-price">2,999<span>/month</span></div>
+      <div class="plan-desc">For growing businesses</div>
+      <ul class="plan-features">
+        <li>Unlimited analyses</li>
+        <li>All modules</li>
+        <li>Branded PDF reports</li>
+        <li>12-month forecasting</li>
+        <li>Smart alerts</li>
+        <li>Priority support</li>
+      </ul>
+      <a href="https://data-intelligence-platform-7p8vfpfosvduyt6ec93vpk.streamlit.app" class="plan-btn plan-btn-filled" target="_blank">Start Free Trial</a>
+    </div>
+    <div class="pricing-card">
+      <div class="plan-name">ENTERPRISE</div>
+      <div class="plan-price">Custom</div>
+      <div class="plan-desc">For large organizations</div>
+      <ul class="plan-features">
+        <li>Everything in Professional</li>
+        <li>Custom modules</li>
+        <li>On-premise deployment</li>
+        <li>API access</li>
+        <li>Dedicated account manager</li>
+      </ul>
+      <a href="mailto:rawatdhiraj007@gmail.com" class="plan-btn plan-btn-outline">Contact Us</a>
+    </div>
+  </div>
+</section>
+
+<section class="comparison">
+  <div class="section-label">Why Us</div>
+  <h2 class="section-title">How We Compare</h2>
+  <div class="comparison-table">
+    <div class="comp-row header">
+      <div class="comp-cell">Feature</div>
+      <div class="comp-cell">DataIntel</div>
+      <div class="comp-cell">Competitors</div>
+    </div>
+    <div class="comp-row"><div class="comp-cell">No technical skills needed</div><div class="comp-cell yes">Yes</div><div class="comp-cell no">No</div></div>
+    <div class="comp-row"><div class="comp-cell">Works with any Excel/CSV</div><div class="comp-cell yes">Yes</div><div class="comp-cell no">Template only</div></div>
+    <div class="comp-row"><div class="comp-cell">Data never stored</div><div class="comp-cell yes">Always</div><div class="comp-cell no">Stored on servers</div></div>
+    <div class="comp-row"><div class="comp-cell">Price inconsistency detection</div><div class="comp-cell yes">Automatic</div><div class="comp-cell no">Not available</div></div>
+    <div class="comp-row"><div class="comp-cell">Smart business alerts</div><div class="comp-cell yes">Built-in</div><div class="comp-cell no">Manual setup</div></div>
+    <div class="comp-row"><div class="comp-cell">Setup time</div><div class="comp-cell yes">0 minutes</div><div class="comp-cell no">Days/weeks</div></div>
+    <div class="comp-row"><div class="comp-cell">Starting price</div><div class="comp-cell yes">999/month</div><div class="comp-cell no">5,000+/month</div></div>
+  </div>
+</section>
+
+<section class="cta-section">
+  <h2>Ready to See Your Data Differently?</h2>
+  <p>No credit card required. Results in 3 minutes.</p>
+  <a href="https://data-intelligence-platform-7p8vfpfosvduyt6ec93vpk.streamlit.app" class="btn-primary" target="_blank">Try It Free Now</a>
+</section>
+
+<footer>
+  <p><strong>DataIntel</strong> — Data Intelligence Platform</p>
+  <p style="margin-top:8px;">Built for non-technical business users &nbsp;|&nbsp; <a href="mailto:rawatdhiraj007@gmail.com" style="color:#64b5f6;">rawatdhiraj007@gmail.com</a></p>
+  <p style="margin-top:8px;">2026 DataIntel. Your data is never stored. Privacy first.</p>
+</footer>
+
+</body>
+</html>
