@@ -142,7 +142,7 @@ if uploaded_file is not None:
     # ════════════════════════════════════════════════════════════════════════
     if module == "Inventory Intelligence":
 
-        # Auto Clean
+        # ── Auto Clean ───────────────────────────────────────────────────────
         df_inv = df.copy()
         issues_fixed_inv = 0
         for col in df_inv.select_dtypes(include='number').columns:
@@ -152,210 +152,405 @@ if uploaded_file is not None:
                 issues_fixed_inv += missing
         df_inv.drop_duplicates(inplace=True)
 
-        # Detect columns
-        prod_col   = next((c for c in df_inv.columns if 'product name' in c.lower() or 'product' in c.lower()), None)
-        cat_col    = next((c for c in df_inv.columns if 'category' in c.lower()), None)
-        stock_col  = next((c for c in df_inv.columns if 'current stock' in c.lower() or 'stock' in c.lower()), None)
-        reorder_col= next((c for c in df_inv.columns if 'reorder' in c.lower()), None)
-        max_col    = next((c for c in df_inv.columns if 'max stock' in c.lower()), None)
-        cost_col   = next((c for c in df_inv.columns if 'unit cost' in c.lower() or 'cost' in c.lower()), None)
-        price_col  = next((c for c in df_inv.columns if 'selling price' in c.lower() or 'price' in c.lower()), None)
-        demand_col = next((c for c in df_inv.columns if 'monthly demand' in c.lower() or 'demand' in c.lower()), None)
-        days_col   = next((c for c in df_inv.columns if 'days in stock' in c.lower()), None)
-        sold30_col = next((c for c in df_inv.columns if 'last 30' in c.lower()), None)
-        sold90_col = next((c for c in df_inv.columns if 'last 90' in c.lower()), None)
+        # ── Detect Columns ───────────────────────────────────────────────────
+        prod_col      = next((c for c in df_inv.columns if 'product name' in c.lower() or 'product' in c.lower()), None)
+        cat_col       = next((c for c in df_inv.columns if 'category' in c.lower()), None)
+        stock_col     = next((c for c in df_inv.columns if 'current stock' in c.lower() or 'stock' in c.lower()), None)
+        reorder_col   = next((c for c in df_inv.columns if 'reorder' in c.lower()), None)
+        max_col       = next((c for c in df_inv.columns if 'max stock' in c.lower()), None)
+        cost_col      = next((c for c in df_inv.columns if 'unit cost' in c.lower() or 'cost' in c.lower()), None)
+        price_col     = next((c for c in df_inv.columns if 'selling price' in c.lower() or 'price' in c.lower()), None)
+        demand_col    = next((c for c in df_inv.columns if 'monthly demand' in c.lower() or 'demand' in c.lower()), None)
+        sold30_col    = next((c for c in df_inv.columns if 'last 30' in c.lower()), None)
+        sold90_col    = next((c for c in df_inv.columns if 'last 90' in c.lower()), None)
         last_sold_col = next((c for c in df_inv.columns if 'last sold' in c.lower()), None)
-        ware_col   = next((c for c in df_inv.columns if 'warehouse' in c.lower()), None)
-        supplier_col = next((c for c in df_inv.columns if 'supplier' in c.lower()), None)
+        ware_col      = next((c for c in df_inv.columns if 'warehouse' in c.lower()), None)
+        supplier_col  = next((c for c in df_inv.columns if 'supplier' in c.lower()), None)
 
-        st.success(f"✅ Inventory file loaded — {len(df_inv):,} products · {len(df_inv.columns)} columns · {issues_fixed_inv} issues auto-fixed")
-
-        # ── SECTION 1: KEY INVENTORY METRICS ────────────────────────────────
-        st.markdown("<div class='section-header'>📦 Inventory Overview</div>", unsafe_allow_html=True)
-
-        c1, c2, c3, c4, c5 = st.columns(5)
-        if stock_col:
-            total_stock = df_inv[stock_col].sum()
-            c1.metric("Total Stock Units", f"{total_stock:,.0f}")
-        if prod_col:
-            c2.metric("Total SKUs", f"{df_inv[prod_col].nunique()}")
-        if reorder_col and stock_col:
-            below_reorder = (df_inv[stock_col] <= df_inv[reorder_col]).sum()
-            c3.metric("Items Below Reorder", f"{below_reorder}", delta=f"Need restocking", delta_color="inverse")
-        if stock_col:
-            out_of_stock = (df_inv[stock_col] == 0).sum()
-            c4.metric("Out of Stock", f"{out_of_stock}", delta="Critical", delta_color="inverse")
-        if cost_col and stock_col:
-            inventory_value = (df_inv[stock_col] * df_inv[cost_col]).sum()
-            c5.metric("Total Inventory Value", f"${inventory_value:,.0f}")
-
-        # ── SECTION 2: STOCK STATUS ANALYSIS ────────────────────────────────
+        # ── Stock Status Classification ──────────────────────────────────────
         if stock_col and reorder_col:
-            st.markdown("<div class='section-header'>🚦 Stock Status Analysis</div>", unsafe_allow_html=True)
-
             df_inv['Stock Status'] = 'Normal'
             df_inv.loc[df_inv[stock_col] == 0, 'Stock Status'] = 'Out of Stock'
             df_inv.loc[(df_inv[stock_col] > 0) & (df_inv[stock_col] <= df_inv[reorder_col]), 'Stock Status'] = 'Low Stock'
-            if max_col in df_inv.columns:
+            if max_col and max_col in df_inv.columns:
                 df_inv.loc[df_inv[stock_col] >= df_inv[max_col] * 0.9, 'Stock Status'] = 'Overstocked'
 
-            col_a, col_b = st.columns(2)
-            with col_a:
-                status_counts = df_inv['Stock Status'].value_counts()
-                fig, ax = plt.subplots(figsize=(6, 4))
-                colors_map = {'Out of Stock': '#ef4444', 'Low Stock': '#f59e0b', 'Normal': '#10b981', 'Overstocked': '#6366f1'}
-                bar_colors = [colors_map.get(s, '#6366f1') for s in status_counts.index]
-                bars = ax.bar(status_counts.index, status_counts.values, color=bar_colors)
-                ax.set_ylabel("Number of Products")
-                ax.set_title("Stock Status Distribution", fontweight='bold')
-                for bar, val in zip(bars, status_counts.values):
-                    ax.text(bar.get_x()+bar.get_width()/2, bar.get_height(), str(val), ha='center', va='bottom', fontweight='bold')
-                plt.tight_layout()
-                st.pyplot(fig); plt.close()
-
-            with col_b:
-                st.write("**Products Needing Immediate Action**")
-                urgent = df_inv[df_inv['Stock Status'].isin(['Out of Stock', 'Low Stock'])]
-                if len(urgent) > 0:
-                    show_cols = [c for c in [prod_col, cat_col, stock_col, reorder_col, 'Stock Status'] if c]
-                    st.dataframe(urgent[show_cols].sort_values('Stock Status').reset_index(drop=True), use_container_width=True)
-                else:
-                    st.markdown("<div class='insight-box'>✅ All products have healthy stock levels!</div>", unsafe_allow_html=True)
-
-        # ── SECTION 3: DEAD STOCK DETECTION ─────────────────────────────────
-        st.markdown("<div class='section-header'>💀 Dead Stock Detection</div>", unsafe_allow_html=True)
-
-        dead_stock = pd.DataFrame()
-        if last_sold_col and stock_col and prod_col:
-            dead_stock = df_inv[(df_inv[last_sold_col] > 90) & (df_inv[stock_col] > 0)].copy()
-            if cost_col in df_inv.columns:
-                dead_stock['Capital Locked ($)'] = (dead_stock[stock_col] * dead_stock[cost_col]).round(0)
-
-        if len(dead_stock) > 0:
-            total_locked = dead_stock['Capital Locked ($)'].sum() if 'Capital Locked ($)' in dead_stock.columns else 0
-            st.markdown(f"<div class='alert-box'>⚠️ <b>{len(dead_stock)} products</b> haven't sold in 90+ days — <b>${total_locked:,.0f}</b> capital locked in dead stock!</div>", unsafe_allow_html=True)
-            show_cols = [c for c in [prod_col, cat_col, stock_col, last_sold_col, 'Capital Locked ($)'] if c in dead_stock.columns]
-            st.dataframe(dead_stock[show_cols].sort_values('Capital Locked ($)', ascending=False).reset_index(drop=True), use_container_width=True)
-        else:
-            st.markdown("<div class='insight-box'>✅ No dead stock detected — inventory is moving well!</div>", unsafe_allow_html=True)
-
-        # ── SECTION 4: ABC ANALYSIS ──────────────────────────────────────────
-        if prod_col and sold90_col:
-            st.markdown("<div class='section-header'>🏆 ABC Analysis — Product Prioritization</div>", unsafe_allow_html=True)
-            st.caption("A = Top 20% products driving 80% of sales · B = Middle 30% · C = Bottom 50% (slow movers)")
-
-            abc = df_inv.groupby(prod_col)[sold90_col].sum().sort_values(ascending=False).reset_index()
-            abc.columns = ['Product', 'Units Sold (90 Days)']
-            abc['Cumulative %'] = (abc['Units Sold (90 Days)'].cumsum() / abc['Units Sold (90 Days)'].sum() * 100).round(1)
-            abc['ABC Class'] = 'C'
-            abc.loc[abc['Cumulative %'] <= 80, 'ABC Class'] = 'A'
-            abc.loc[(abc['Cumulative %'] > 80) & (abc['Cumulative %'] <= 95), 'ABC Class'] = 'B'
-
-            col_a, col_b = st.columns(2)
-            with col_a:
-                abc_counts = abc['ABC Class'].value_counts()
-                fig, ax = plt.subplots(figsize=(5, 4))
-                abc_colors = {'A': '#10b981', 'B': '#6366f1', 'C': '#9ca3af'}
-                wedge_colors = [abc_colors.get(c, '#6366f1') for c in abc_counts.index]
-                ax.pie(abc_counts.values, labels=[f"Class {c}" for c in abc_counts.index],
-                       autopct='%1.0f%%', colors=wedge_colors, startangle=90)
-                ax.set_title("ABC Distribution", fontweight='bold')
-                plt.tight_layout()
-                st.pyplot(fig); plt.close()
-
-            with col_b:
-                st.write("**Class A — Star Products (Protect These)**")
-                class_a = abc[abc['ABC Class'] == 'A'].head(10)
-                st.dataframe(class_a[['Product', 'Units Sold (90 Days)', 'ABC Class']].reset_index(drop=True), use_container_width=True)
-
-        # ── SECTION 5: REORDER ALERTS ────────────────────────────────────────
-        if stock_col and reorder_col and demand_col and prod_col:
-            st.markdown("<div class='section-header'>🔔 Reorder Intelligence</div>", unsafe_allow_html=True)
-
+        # ── Days of Stock Left ───────────────────────────────────────────────
+        if stock_col and demand_col:
             df_inv['Days of Stock Left'] = (df_inv[stock_col] / (df_inv[demand_col] / 30)).round(1)
             df_inv['Days of Stock Left'] = df_inv['Days of Stock Left'].replace([float('inf'), -float('inf')], 999)
 
-            reorder_needed = df_inv[df_inv['Days of Stock Left'] < 30].sort_values('Days of Stock Left')
-
-            if len(reorder_needed) > 0:
-                st.markdown(f"<div class='alert-box'>⚠️ <b>{len(reorder_needed)} products</b> will run out within 30 days — reorder now!</div>", unsafe_allow_html=True)
-                show_cols = [c for c in [prod_col, cat_col, stock_col, demand_col, 'Days of Stock Left', supplier_col] if c and c in reorder_needed.columns]
-                display_df = reorder_needed[show_cols].reset_index(drop=True)
-                st.dataframe(display_df, use_container_width=True)
-            else:
-                st.markdown("<div class='insight-box'>✅ All products have sufficient stock for next 30 days.</div>", unsafe_allow_html=True)
-
-        # ── SECTION 6: CATEGORY PERFORMANCE ─────────────────────────────────
-        if cat_col and stock_col:
-            st.markdown("<div class='section-header'>📊 Category Intelligence</div>", unsafe_allow_html=True)
-
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.write("**Stock Value by Category**")
-                if cost_col:
-                    df_inv['Stock Value'] = df_inv[stock_col] * df_inv[cost_col]
-                    cat_value = df_inv.groupby(cat_col)['Stock Value'].sum().sort_values(ascending=False)
-                    fig, ax = plt.subplots(figsize=(6, 4))
-                    cat_value.plot(kind='barh', ax=ax, color='#6366f1')
-                    ax.set_xlabel("Stock Value ($)")
-                    ax.invert_yaxis()
-                    plt.tight_layout()
-                    st.pyplot(fig); plt.close()
-
-            with col_b:
-                st.write("**Units Sold (Last 90 Days) by Category**")
-                if sold90_col:
-                    cat_sold = df_inv.groupby(cat_col)[sold90_col].sum().sort_values(ascending=False)
-                    fig, ax = plt.subplots(figsize=(6, 4))
-                    ax.pie(cat_sold.values, labels=cat_sold.index, autopct='%1.1f%%',
-                           colors=['#6366f1','#818cf8','#a5b4fc','#c7d2fe','#e0e7ff','#4f46e5'])
-                    plt.tight_layout()
-                    st.pyplot(fig); plt.close()
-
-        # ── SECTION 7: PROFIT MARGIN ANALYSIS ───────────────────────────────
-        if cost_col and price_col and prod_col:
-            st.markdown("<div class='section-header'>💰 Profit Margin Analysis</div>", unsafe_allow_html=True)
-
+        # ── Margin ───────────────────────────────────────────────────────────
+        if cost_col and price_col:
             df_inv['Margin ($)'] = df_inv[price_col] - df_inv[cost_col]
             df_inv['Margin %'] = ((df_inv['Margin ($)'] / df_inv[price_col]) * 100).round(1)
 
+        # ── Stock Value ──────────────────────────────────────────────────────
+        if stock_col and cost_col:
+            df_inv['Stock Value ($)'] = (df_inv[stock_col] * df_inv[cost_col]).round(0)
+
+        # ── Dead Stock ───────────────────────────────────────────────────────
+        dead_stock = pd.DataFrame()
+        if last_sold_col and stock_col:
+            dead_stock = df_inv[(df_inv[last_sold_col] > 90) & (df_inv[stock_col] > 0)].copy()
+
+        st.success(f"✅ Inventory file loaded — {len(df_inv):,} products · {len(df_inv.columns)} columns · {issues_fixed_inv} issues auto-fixed")
+
+        # ── SIDEBAR FILTERS ──────────────────────────────────────────────────
+        with st.sidebar:
+            st.markdown("### 🔍 Filter Inventory")
+            df_filtered = df_inv.copy()
+
+            if cat_col:
+                all_cats = ['All Categories'] + sorted(df_inv[cat_col].dropna().unique().tolist())
+                sel_cat = st.selectbox("Category", all_cats)
+                if sel_cat != 'All Categories':
+                    df_filtered = df_filtered[df_filtered[cat_col] == sel_cat]
+
+            if ware_col:
+                all_ware = ['All Warehouses'] + sorted(df_inv[ware_col].dropna().unique().tolist())
+                sel_ware = st.selectbox("Warehouse", all_ware)
+                if sel_ware != 'All Warehouses':
+                    df_filtered = df_filtered[df_filtered[ware_col] == sel_ware]
+
+            if 'Stock Status' in df_inv.columns:
+                all_status = ['All Statuses'] + sorted(df_inv['Stock Status'].dropna().unique().tolist())
+                sel_status = st.selectbox("Stock Status", all_status)
+                if sel_status != 'All Statuses':
+                    df_filtered = df_filtered[df_filtered['Stock Status'] == sel_status]
+
+            if supplier_col:
+                all_sup = ['All Suppliers'] + sorted(df_inv[supplier_col].dropna().unique().tolist())
+                sel_sup = st.selectbox("Supplier", all_sup)
+                if sel_sup != 'All Suppliers':
+                    df_filtered = df_filtered[df_filtered[supplier_col] == sel_sup]
+
+            st.caption(f"Showing **{len(df_filtered)}** of **{len(df_inv)}** products")
+
+        # ── KPI CARDS ────────────────────────────────────────────────────────
+        inv_val     = df_filtered['Stock Value ($)'].sum() if 'Stock Value ($)' in df_filtered.columns else 0
+        total_skus  = df_filtered[prod_col].nunique() if prod_col else len(df_filtered)
+        oos_count   = (df_filtered[stock_col] == 0).sum() if stock_col else 0
+        low_count   = (df_filtered['Stock Status'] == 'Low Stock').sum() if 'Stock Status' in df_filtered.columns else 0
+        over_count  = (df_filtered['Stock Status'] == 'Overstocked').sum() if 'Stock Status' in df_filtered.columns else 0
+        dead_count  = len(dead_stock[dead_stock.index.isin(df_filtered.index)]) if len(dead_stock) > 0 else 0
+
+        st.markdown(f"""
+        <div style='display:grid; grid-template-columns:repeat(6,1fr); gap:12px; margin:16px 0 24px 0;'>
+            <div style='background:white; border-radius:12px; padding:16px 12px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:3px solid #6366f1;'>
+                <div style='font-size:1.5rem; font-weight:800; color:#0a0a0a;'>{total_skus}</div>
+                <div style='font-size:0.72rem; color:#6b7280; margin-top:4px; font-weight:500;'>TOTAL SKUs</div>
+            </div>
+            <div style='background:white; border-radius:12px; padding:16px 12px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:3px solid #6366f1;'>
+                <div style='font-size:1.5rem; font-weight:800; color:#0a0a0a;'>${inv_val:,.0f}</div>
+                <div style='font-size:0.72rem; color:#6b7280; margin-top:4px; font-weight:500;'>INVENTORY VALUE</div>
+            </div>
+            <div style='background:white; border-radius:12px; padding:16px 12px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:3px solid #ef4444;'>
+                <div style='font-size:1.5rem; font-weight:800; color:#ef4444;'>{oos_count}</div>
+                <div style='font-size:0.72rem; color:#6b7280; margin-top:4px; font-weight:500;'>OUT OF STOCK</div>
+            </div>
+            <div style='background:white; border-radius:12px; padding:16px 12px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:3px solid #f59e0b;'>
+                <div style='font-size:1.5rem; font-weight:800; color:#f59e0b;'>{low_count}</div>
+                <div style='font-size:0.72rem; color:#6b7280; margin-top:4px; font-weight:500;'>LOW STOCK</div>
+            </div>
+            <div style='background:white; border-radius:12px; padding:16px 12px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:3px solid #6366f1;'>
+                <div style='font-size:1.5rem; font-weight:800; color:#6366f1;'>{over_count}</div>
+                <div style='font-size:0.72rem; color:#6b7280; margin-top:4px; font-weight:500;'>OVERSTOCKED</div>
+            </div>
+            <div style='background:white; border-radius:12px; padding:16px 12px; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:3px solid #9ca3af;'>
+                <div style='font-size:1.5rem; font-weight:800; color:#9ca3af;'>{dead_count}</div>
+                <div style='font-size:0.72rem; color:#6b7280; margin-top:4px; font-weight:500;'>DEAD STOCK</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── TABS ─────────────────────────────────────────────────────────────
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            "🚦 Stock Status", "💀 Dead Stock", "🏆 ABC Analysis",
+            "🔔 Reorder Alerts", "📊 Category & Margins", "🚨 Smart Alerts"
+        ])
+
+        # ══ TAB 1: STOCK STATUS ══════════════════════════════════════════════
+        with tab1:
+            if stock_col and reorder_col and 'Stock Status' in df_filtered.columns:
+                col_a, col_b = st.columns([1, 1])
+                with col_a:
+                    status_counts = df_filtered['Stock Status'].value_counts()
+                    colors_map = {'Out of Stock': '#ef4444', 'Low Stock': '#f59e0b', 'Normal': '#10b981', 'Overstocked': '#6366f1'}
+                    bar_colors = [colors_map.get(s, '#6366f1') for s in status_counts.index]
+                    fig, ax = plt.subplots(figsize=(6, 4))
+                    fig.patch.set_facecolor('white')
+                    bars = ax.bar(status_counts.index, status_counts.values, color=bar_colors, width=0.5, edgecolor='white', linewidth=2)
+                    ax.set_ylabel("Products", fontsize=11)
+                    ax.set_title("Stock Status Distribution", fontweight='bold', fontsize=13, pad=12)
+                    ax.spines[['top','right']].set_visible(False)
+                    ax.set_facecolor('#f9fafb')
+                    for bar, val in zip(bars, status_counts.values):
+                        ax.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.3, str(val),
+                                ha='center', va='bottom', fontweight='bold', fontsize=12)
+                    plt.tight_layout()
+                    st.pyplot(fig); plt.close()
+
+                with col_b:
+                    # Status summary cards
+                    for status, color in [('Out of Stock','#ef4444'),('Low Stock','#f59e0b'),('Normal','#10b981'),('Overstocked','#6366f1')]:
+                        count = (df_filtered['Stock Status'] == status).sum()
+                        pct = count / len(df_filtered) * 100 if len(df_filtered) > 0 else 0
+                        st.markdown(f"""
+                        <div style='display:flex; justify-content:space-between; align-items:center;
+                             background:white; border-radius:10px; padding:12px 16px; margin:6px 0;
+                             border-left:4px solid {color}; box-shadow:0 1px 4px rgba(0,0,0,0.06);'>
+                            <span style='font-weight:600; color:#0a0a0a;'>{status}</span>
+                            <span style='font-size:1.2rem; font-weight:800; color:{color};'>{count} <span style='font-size:0.75rem; color:#6b7280;'>({pct:.0f}%)</span></span>
+                        </div>""", unsafe_allow_html=True)
+
+                st.markdown("#### 📋 Products Needing Action")
+                urgent = df_filtered[df_filtered['Stock Status'].isin(['Out of Stock', 'Low Stock'])].copy()
+                if len(urgent) > 0:
+                    show_cols = [c for c in [prod_col, cat_col, ware_col, stock_col, reorder_col, 'Stock Status'] if c and c in urgent.columns]
+                    urgent_display = urgent[show_cols].sort_values('Stock Status').reset_index(drop=True)
+                    st.dataframe(
+                        urgent_display.style.apply(
+                            lambda col: ['background-color: #fef2f2; color: #991b1b' if v == 'Out of Stock'
+                                         else 'background-color: #fffbeb; color: #92400e' if v == 'Low Stock'
+                                         else '' for v in col], subset=['Stock Status']
+                        ) if 'Stock Status' in urgent_display.columns else urgent_display,
+                        use_container_width=True, height=400
+                    )
+                else:
+                    st.markdown("<div class='insight-box'>✅ All products have healthy stock levels!</div>", unsafe_allow_html=True)
+
+        # ══ TAB 2: DEAD STOCK ════════════════════════════════════════════════
+        with tab2:
+            dead_filtered = df_filtered[(df_filtered[last_sold_col] > 90) & (df_filtered[stock_col] > 0)].copy() if last_sold_col and stock_col else pd.DataFrame()
+            if 'Stock Value ($)' in dead_filtered.columns:
+                dead_locked = dead_filtered['Stock Value ($)'].sum()
+            else:
+                dead_locked = 0
+
+            if len(dead_filtered) > 0:
+                col_a, col_b, col_c = st.columns(3)
+                col_a.metric("Dead Stock Products", len(dead_filtered))
+                col_b.metric("Capital Locked", f"${dead_locked:,.0f}")
+                col_c.metric("% of Inventory", f"{dead_locked/inv_val*100:.1f}%" if inv_val > 0 else "N/A")
+
+                st.markdown(f"<div class='alert-box'>⚠️ <b>{len(dead_filtered)} products</b> haven't sold in 90+ days. Consider discounting, bundling, or liquidating to free up <b>${dead_locked:,.0f}</b> in capital.</div>", unsafe_allow_html=True)
+
+                show_cols = [c for c in [prod_col, cat_col, ware_col, stock_col, last_sold_col, 'Stock Value ($)'] if c and c in dead_filtered.columns]
+                st.dataframe(
+                    dead_filtered[show_cols].sort_values('Stock Value ($)', ascending=False).reset_index(drop=True),
+                    use_container_width=True, height=400
+                )
+
+                if cat_col and 'Stock Value ($)' in dead_filtered.columns:
+                    st.markdown("#### Dead Stock by Category")
+                    dead_cat = dead_filtered.groupby(cat_col)['Stock Value ($)'].sum().sort_values(ascending=False)
+                    fig, ax = plt.subplots(figsize=(8, 3))
+                    fig.patch.set_facecolor('white')
+                    ax.barh(dead_cat.index, dead_cat.values, color='#ef4444', alpha=0.8)
+                    ax.set_xlabel("Capital Locked ($)")
+                    ax.set_facecolor('#f9fafb')
+                    ax.spines[['top','right']].set_visible(False)
+                    for i, val in enumerate(dead_cat.values):
+                        ax.text(val, i, f'  ${val:,.0f}', va='center', fontsize=9)
+                    plt.tight_layout()
+                    st.pyplot(fig); plt.close()
+            else:
+                st.markdown("<div class='insight-box'>✅ No dead stock detected — all inventory is moving!</div>", unsafe_allow_html=True)
+
+        # ══ TAB 3: ABC ANALYSIS ══════════════════════════════════════════════
+        with tab3:
+            if prod_col and sold90_col:
+                st.caption("**A** = Top products driving 80% of sales (protect & prioritize) · **B** = Middle tier · **C** = Slow movers (review)")
+
+                abc = df_filtered.groupby(prod_col)[sold90_col].sum().sort_values(ascending=False).reset_index()
+                abc.columns = ['Product', 'Units Sold (90d)']
+                total_sold = abc['Units Sold (90d)'].sum()
+                abc['Cumulative %'] = (abc['Units Sold (90d)'].cumsum() / total_sold * 100).round(1) if total_sold > 0 else 0
+                abc['ABC Class'] = 'C'
+                abc.loc[abc['Cumulative %'] <= 80, 'ABC Class'] = 'A'
+                abc.loc[(abc['Cumulative %'] > 80) & (abc['Cumulative %'] <= 95), 'ABC Class'] = 'B'
+
+                col_a, col_b = st.columns([1, 1])
+                with col_a:
+                    abc_counts = abc['ABC Class'].value_counts().reindex(['A','B','C'], fill_value=0)
+                    abc_colors_list = ['#10b981','#6366f1','#9ca3af']
+                    fig, ax = plt.subplots(figsize=(5, 5))
+                    fig.patch.set_facecolor('white')
+                    wedges, texts, autotexts = ax.pie(
+                        abc_counts.values, labels=[f'Class {c}' for c in abc_counts.index],
+                        autopct='%1.0f%%', colors=abc_colors_list, startangle=90,
+                        wedgeprops=dict(edgecolor='white', linewidth=2)
+                    )
+                    for t in autotexts: t.set_fontweight('bold')
+                    ax.set_title("ABC Class Distribution", fontweight='bold', fontsize=13)
+                    plt.tight_layout()
+                    st.pyplot(fig); plt.close()
+
+                with col_b:
+                    for cls, color, label in [('A','#10b981','Star Products — Never let these go OOS'),
+                                               ('B','#6366f1','Growing Products — Monitor closely'),
+                                               ('C','#9ca3af','Slow Movers — Review or discount')]:
+                        cls_data = abc[abc['ABC Class'] == cls]
+                        cls_units = cls_data['Units Sold (90d)'].sum()
+                        st.markdown(f"""
+                        <div style='background:white; border-radius:10px; padding:14px 16px; margin:8px 0;
+                             border-left:4px solid {color}; box-shadow:0 1px 4px rgba(0,0,0,0.06);'>
+                            <div style='font-weight:800; font-size:1rem; color:{color};'>Class {cls} — {len(cls_data)} products</div>
+                            <div style='font-size:0.82rem; color:#6b7280; margin-top:2px;'>{label}</div>
+                            <div style='font-size:0.82rem; color:#0a0a0a; margin-top:4px; font-weight:600;'>{cls_units:,} units sold in 90 days</div>
+                        </div>""", unsafe_allow_html=True)
+
+                st.markdown("#### Full ABC Table")
+                abc_styled = abc.copy()
+                st.dataframe(
+                    abc_styled.style.apply(
+                        lambda col: ['background-color:#f0fdf4; color:#166534' if v=='A'
+                                     else 'background-color:#eef2ff; color:#3730a3' if v=='B'
+                                     else 'background-color:#f9fafb; color:#4b5563' for v in col],
+                        subset=['ABC Class']
+                    ),
+                    use_container_width=True, height=400
+                )
+
+        # ══ TAB 4: REORDER ALERTS ════════════════════════════════════════════
+        with tab4:
+            if stock_col and reorder_col and demand_col and prod_col and 'Days of Stock Left' in df_filtered.columns:
+                reorder_df = df_filtered[df_filtered['Days of Stock Left'] < 30].sort_values('Days of Stock Left').copy()
+                critical_df = df_filtered[df_filtered['Days of Stock Left'] < 7].copy()
+
+                col_a, col_b, col_c = st.columns(3)
+                col_a.metric("Reorder Needed (<30 days)", len(reorder_df), delta="Act now" if len(reorder_df)>0 else None, delta_color="inverse")
+                col_b.metric("Critical (<7 days)", len(critical_df), delta="URGENT" if len(critical_df)>0 else None, delta_color="inverse")
+                col_c.metric("Healthy Stock (>30 days)", len(df_filtered) - len(reorder_df))
+
+                if len(reorder_df) > 0:
+                    st.markdown(f"<div class='alert-box'>⚠️ <b>{len(reorder_df)} products</b> will run out within 30 days. Place orders immediately!</div>", unsafe_allow_html=True)
+
+                    # Bar chart of days left
+                    top_urgent = reorder_df.head(15)
+                    if prod_col in top_urgent.columns:
+                        fig, ax = plt.subplots(figsize=(10, 4))
+                        fig.patch.set_facecolor('white')
+                        bar_c = ['#ef4444' if d < 7 else '#f59e0b' for d in top_urgent['Days of Stock Left']]
+                        ax.barh(top_urgent[prod_col].str[:25], top_urgent['Days of Stock Left'], color=bar_c)
+                        ax.axvline(x=7, color='#ef4444', linestyle='--', alpha=0.6, label='Critical (7 days)')
+                        ax.axvline(x=14, color='#f59e0b', linestyle='--', alpha=0.6, label='Warning (14 days)')
+                        ax.set_xlabel("Days of Stock Remaining")
+                        ax.set_title("Products Running Low — Days of Stock Left", fontweight='bold')
+                        ax.set_facecolor('#f9fafb')
+                        ax.spines[['top','right']].set_visible(False)
+                        ax.legend(fontsize=9)
+                        plt.tight_layout()
+                        st.pyplot(fig); plt.close()
+
+                    show_cols = [c for c in [prod_col, cat_col, ware_col, stock_col, demand_col, 'Days of Stock Left', supplier_col] if c and c in reorder_df.columns]
+                    st.dataframe(
+                        reorder_df[show_cols].reset_index(drop=True).style.apply(
+                            lambda col: ['background-color:#fef2f2' if v < 7
+                                         else 'background-color:#fffbeb' if v < 14
+                                         else '' for v in col], subset=['Days of Stock Left']
+                        ),
+                        use_container_width=True, height=350
+                    )
+                else:
+                    st.markdown("<div class='insight-box'>✅ All products have 30+ days of stock. No immediate reorders needed.</div>", unsafe_allow_html=True)
+
+        # ══ TAB 5: CATEGORY & MARGINS ════════════════════════════════════════
+        with tab5:
             col_a, col_b = st.columns(2)
+
             with col_a:
-                st.write("**Top 10 Highest Margin Products**")
-                top_margin = df_inv[[prod_col, cost_col, price_col, 'Margin %']].sort_values('Margin %', ascending=False).head(10)
-                top_margin = top_margin.rename(columns={cost_col: 'Cost ($)', price_col: 'Price ($)'})
-                st.dataframe(top_margin.reset_index(drop=True), use_container_width=True)
+                if cat_col and 'Stock Value ($)' in df_filtered.columns:
+                    st.markdown("#### Stock Value by Category")
+                    cat_val = df_filtered.groupby(cat_col)['Stock Value ($)'].sum().sort_values(ascending=False)
+                    fig, ax = plt.subplots(figsize=(6, 4))
+                    fig.patch.set_facecolor('white')
+                    colors_grad = ['#6366f1','#818cf8','#a5b4fc','#c7d2fe','#e0e7ff','#4f46e5']
+                    ax.barh(cat_val.index, cat_val.values, color=colors_grad[:len(cat_val)])
+                    ax.set_xlabel("Value ($)")
+                    ax.invert_yaxis()
+                    ax.set_facecolor('#f9fafb')
+                    ax.spines[['top','right']].set_visible(False)
+                    for i, val in enumerate(cat_val.values):
+                        ax.text(val, i, f'  ${val:,.0f}', va='center', fontsize=9)
+                    plt.tight_layout()
+                    st.pyplot(fig); plt.close()
 
             with col_b:
-                st.write("**Bottom 10 Lowest Margin Products**")
-                low_margin = df_inv[[prod_col, cost_col, price_col, 'Margin %']].sort_values('Margin %').head(10)
-                low_margin = low_margin.rename(columns={cost_col: 'Cost ($)', price_col: 'Price ($)'})
-                st.dataframe(low_margin.reset_index(drop=True), use_container_width=True)
+                if cat_col and sold90_col:
+                    st.markdown("#### Units Sold by Category (90 Days)")
+                    cat_sold = df_filtered.groupby(cat_col)[sold90_col].sum().sort_values(ascending=False)
+                    fig, ax = plt.subplots(figsize=(6, 4))
+                    fig.patch.set_facecolor('white')
+                    wedges, texts, autotexts = ax.pie(
+                        cat_sold.values, labels=cat_sold.index, autopct='%1.1f%%',
+                        colors=['#6366f1','#818cf8','#a5b4fc','#c7d2fe','#e0e7ff','#4f46e5'],
+                        wedgeprops=dict(edgecolor='white', linewidth=2), startangle=90
+                    )
+                    for t in autotexts: t.set_fontweight('bold')
+                    plt.tight_layout()
+                    st.pyplot(fig); plt.close()
 
-        # ── SECTION 8: SMART INVENTORY ALERTS ───────────────────────────────
-        st.markdown("<div class='section-header'>🚨 Smart Inventory Alerts</div>", unsafe_allow_html=True)
+            if cost_col and price_col and prod_col and 'Margin %' in df_filtered.columns:
+                st.markdown("#### Profit Margin Analysis")
+                col_c, col_d = st.columns(2)
 
-        inv_alerts = []
-        if stock_col:
-            oos = (df_inv[stock_col] == 0).sum()
-            if oos > 0:
-                inv_alerts.append(f"🔴 <b>{oos} products</b> are completely OUT OF STOCK — immediate action required")
-        if 'Days of Stock Left' in df_inv.columns:
-            critical = (df_inv['Days of Stock Left'] < 7).sum()
-            if critical > 0:
-                inv_alerts.append(f"🔴 <b>{critical} products</b> will run out within 7 days — URGENT reorder needed")
-        if len(dead_stock) > 0:
-            inv_alerts.append(f"⚠️ <b>{len(dead_stock)} products</b> are dead stock — consider discounting or liquidating")
-        if 'Stock Status' in df_inv.columns:
-            over = (df_inv['Stock Status'] == 'Overstocked').sum()
-            if over > 0:
-                inv_alerts.append(f"⚠️ <b>{over} products</b> are overstocked — capital tied up unnecessarily")
+                with col_c:
+                    st.markdown("**🏆 Top 10 Highest Margin**")
+                    top_margin = df_filtered[[prod_col, cost_col, price_col, 'Margin %']].sort_values('Margin %', ascending=False).head(10).reset_index(drop=True)
+                    st.dataframe(top_margin.style.background_gradient(subset=['Margin %'], cmap='Greens'), use_container_width=True)
 
-        if len(inv_alerts) == 0:
-            st.markdown("<div class='insight-box'>✅ Inventory looks healthy — no critical alerts!</div>", unsafe_allow_html=True)
-        else:
-            for alert in inv_alerts:
-                st.markdown(f"<div class='alert-box'>{alert}</div>", unsafe_allow_html=True)
+                with col_d:
+                    st.markdown("**⚠️ Bottom 10 Lowest Margin**")
+                    low_margin = df_filtered[[prod_col, cost_col, price_col, 'Margin %']].sort_values('Margin %').head(10).reset_index(drop=True)
+                    st.dataframe(low_margin.style.background_gradient(subset=['Margin %'], cmap='Reds_r'), use_container_width=True)
+
+        # ══ TAB 6: SMART ALERTS ══════════════════════════════════════════════
+        with tab6:
+            inv_alerts = []
+            if stock_col:
+                oos = (df_filtered[stock_col] == 0).sum()
+                if oos > 0:
+                    inv_alerts.append(('🔴', 'critical', f"<b>{oos} products</b> are completely OUT OF STOCK — immediate action required"))
+            if 'Days of Stock Left' in df_filtered.columns:
+                crit7 = (df_filtered['Days of Stock Left'] < 7).sum()
+                if crit7 > 0:
+                    inv_alerts.append(('🔴', 'critical', f"<b>{crit7} products</b> will run out within 7 days — URGENT reorder needed"))
+            if len(dead_filtered) > 0:
+                inv_alerts.append(('⚠️', 'warning', f"<b>{len(dead_filtered)} products</b> are dead stock — consider discounting or liquidating (${dead_locked:,.0f} locked)"))
+            if 'Stock Status' in df_filtered.columns:
+                over = (df_filtered['Stock Status'] == 'Overstocked').sum()
+                if over > 0:
+                    inv_stock_val = df_filtered[df_filtered['Stock Status']=='Overstocked']['Stock Value ($)'].sum() if 'Stock Value ($)' in df_filtered.columns else 0
+                    inv_alerts.append(('⚠️', 'warning', f"<b>{over} products</b> are overstocked — ${inv_stock_val:,.0f} tied up unnecessarily"))
+            if 'Margin %' in df_filtered.columns:
+                neg_margin = (df_filtered['Margin %'] < 0).sum()
+                if neg_margin > 0:
+                    inv_alerts.append(('🔴', 'critical', f"<b>{neg_margin} products</b> have NEGATIVE margins — selling below cost!"))
+                low_margin_count = ((df_filtered['Margin %'] >= 0) & (df_filtered['Margin %'] < 10)).sum()
+                if low_margin_count > 0:
+                    inv_alerts.append(('⚠️', 'warning', f"<b>{low_margin_count} products</b> have margins below 10% — consider price review"))
+
+            if len(inv_alerts) == 0:
+                st.markdown("<div class='insight-box' style='padding:20px; font-size:1rem;'>✅ All clear! Inventory looks healthy — no critical alerts at this time.</div>", unsafe_allow_html=True)
+            else:
+                critical_alerts = [(e,m) for e,t,m in inv_alerts if t=='critical']
+                warning_alerts  = [(e,m) for e,t,m in inv_alerts if t=='warning']
+
+                if critical_alerts:
+                    st.markdown("#### 🔴 Critical — Act Now")
+                    for e, msg in critical_alerts:
+                        st.markdown(f"""<div style='background:#fef2f2; border-left:4px solid #ef4444;
+                            padding:14px 16px; border-radius:8px; margin:6px 0; font-size:0.9rem;'>
+                            {e} {msg}</div>""", unsafe_allow_html=True)
+
+                if warning_alerts:
+                    st.markdown("#### ⚠️ Warnings — Monitor")
+                    for e, msg in warning_alerts:
+                        st.markdown(f"""<div style='background:#fffbeb; border-left:4px solid #f59e0b;
+                            padding:14px 16px; border-radius:8px; margin:6px 0; font-size:0.9rem;'>
+                            {e} {msg}</div>""", unsafe_allow_html=True)
 
         st.stop()
 
