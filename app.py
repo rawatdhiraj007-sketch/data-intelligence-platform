@@ -44,10 +44,11 @@ def smart_clean(df_raw, filename=""):
             best_score = s
             best_row = i
 
+    # Always assign headers from best_row (0 = normal file, >0 = file with title rows above)
+    df.columns = df.iloc[best_row].astype(str).str.strip()
+    df = df.iloc[best_row + 1:].reset_index(drop=True)
     if best_row > 0:
         fixes.append(f"📋 Detected real headers on row {best_row + 1} — skipped {best_row} title row(s)")
-        df.columns = df.iloc[best_row].astype(str).str.strip()
-        df = df.iloc[best_row + 1:].reset_index(drop=True)
 
     # ── 2. CLEAN COLUMN NAMES ────────────────────────────────────────────────
     original_cols = list(df.columns)
@@ -697,15 +698,15 @@ if module == "Inventory Intelligence":
         df_filtered = df_inv.copy()
         if cat_col:
             cats = ['All'] + sorted(df_inv[cat_col].dropna().unique().tolist())
-            sc = st.selectbox("Category", cats)
+            sc = st.selectbox("Category", cats, key="inv_cat")
             if sc != 'All': df_filtered = df_filtered[df_filtered[cat_col] == sc]
         if ware_col:
             wares = ['All'] + sorted(df_inv[ware_col].dropna().unique().tolist())
-            sw = st.selectbox("Warehouse", wares)
+            sw = st.selectbox("Warehouse", wares, key="inv_ware")
             if sw != 'All': df_filtered = df_filtered[df_filtered[ware_col] == sw]
         if 'Stock Status' in df_inv.columns:
             statuses = ['All'] + sorted(df_inv['Stock Status'].dropna().unique().tolist())
-            ss = st.selectbox("Status", statuses)
+            ss = st.selectbox("Status", statuses, key="inv_status")
             if ss != 'All': df_filtered = df_filtered[df_filtered['Stock Status'] == ss]
         st.caption(f"**{len(df_filtered)}** of **{len(df_inv)}** products")
 
