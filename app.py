@@ -120,28 +120,53 @@ def smart_clean(df_raw, filename=""):
 
     # ── 7. REMOVE DUPLICATE ROWS ────────────────────────────────────────────
     before = len(df)
-    df.drop_duplicates(inplace=True)
+    # For large files use subset of key columns to speed up dedup
+    if len(df) > 100_000:
+        key_cols = df.columns[:min(5, len(df.columns))].tolist()
+        df.drop_duplicates(subset=key_cols, inplace=True)
+    else:
+        df.drop_duplicates(inplace=True)
     dups = before - len(df)
     if dups > 0:
         fixes.append(f"🔁 Removed {dups} duplicate row(s)")
     df.reset_index(drop=True, inplace=True)
 
+    # ── LARGE FILE OPTIMISATION ──────────────────────────────────────────
+    # Downcast numeric columns only — no category conversion (causes pyarrow issues)
+    if len(df) > 50_000:
+        for col in df.select_dtypes(include=['float64']).columns:
+            try:
+                df[col] = pd.to_numeric(df[col], downcast='float')
+            except Exception:
+                pass
+        for col in df.select_dtypes(include=['int64']).columns:
+            try:
+                df[col] = pd.to_numeric(df[col], downcast='integer')
+            except Exception:
+                pass
+
     # ── 8. CLEAN TEXT COLUMNS ────────────────────────────────────────────────
     text_fixes = 0
     for col in df.select_dtypes(include='object').columns:
-        original = df[col].copy()
-        # Strip whitespace
-        df[col] = df[col].astype(str).str.strip()
-        df[col] = df[col].str.replace(r'\s+', ' ', regex=True)
-        # Fix 'nan' strings
-        df[col] = df[col].replace({'nan': np.nan, 'none': np.nan, 'None': np.nan,
-                                    'NULL': np.nan, 'null': np.nan, 'N/A': np.nan,
-                                    'n/a': np.nan, 'NA': np.nan, '': np.nan})
-        # Title case for category-like columns (low unique count)
-        if df[col].nunique() < 30 and df[col].nunique() > 0:
-            df[col] = df[col].str.title()
-        changed = (df[col].fillna('') != original.fillna('')).sum()
-        text_fixes += changed
+        try:
+            original_str = df[col].astype(str).fillna('')
+            # Strip whitespace
+            df[col] = df[col].astype(str).str.strip()
+            df[col] = df[col].str.replace(r'\s+', ' ', regex=True)
+            # Fix 'nan' strings back to NaN
+            df[col] = df[col].replace({'nan': np.nan, 'none': np.nan, 'None': np.nan,
+                                        'NULL': np.nan, 'null': np.nan, 'N/A': np.nan,
+                                        'n/a': np.nan, 'NA': np.nan, '': np.nan})
+            # Title case for category-like columns (low unique count)
+            nuniq = df[col].nunique()
+            if 0 < nuniq < 30:
+                df[col] = df[col].str.title()
+            # Count changes safely
+            new_str = df[col].astype(str).fillna('')
+            changed = int((new_str != original_str).sum())
+            text_fixes += changed
+        except Exception:
+            pass
     if text_fixes > 0:
         fixes.append(f"✍️ Fixed {text_fixes} text value(s) — standardised case, removed extra spaces")
 
@@ -220,27 +245,91 @@ def smart_clean(df_raw, filename=""):
     return df, fixes
 
 
+CHUNK_SIZE = 100_000   # rows per chunk for large files
+LARGE_FILE_THRESHOLD = 50_000  # rows — show progress bar above this
+
 def load_file(uploaded_file):
-    """Load any Excel/CSV — including multi-sheet Excel files."""
+    """
+    Load any Excel/CSV with large-file support.
+    - CSV files > 50K rows: chunked loading with progress bar
+    - Excel files: multi-sheet selector, optimised dtypes
+    - Also supports JSON files
+    """
     name = uploaded_file.name.lower()
+
+    # ── JSON ─────────────────────────────────────────────────────────────
+    if name.endswith('.json'):
+        return pd.read_json(uploaded_file)
+
+    # ── CSV ──────────────────────────────────────────────────────────────
     if name.endswith('.csv'):
+        # Peek at file size
+        uploaded_file.seek(0, 2)
+        file_size = uploaded_file.tell()
+        uploaded_file.seek(0)
+
+        # Large CSV: chunk it
+        if file_size > 10 * 1024 * 1024:  # > 10MB
+            progress_bar = st.progress(0, text="⚡ Loading large file...")
+            chunks = []
+            try:
+                chunk_iter = pd.read_csv(uploaded_file, chunksize=CHUNK_SIZE, low_memory=False)
+            except Exception:
+                uploaded_file.seek(0)
+                chunk_iter = pd.read_csv(uploaded_file, chunksize=CHUNK_SIZE, encoding='latin-1', low_memory=False)
+
+            total_rows = 0
+            for i, chunk in enumerate(chunk_iter):
+                chunks.append(chunk)
+                total_rows += len(chunk)
+                pct = min(0.95, (i+1) * 0.1)
+                progress_bar.progress(pct, text=f"⚡ Loaded {total_rows:,} rows...")
+
+            progress_bar.progress(1.0, text=f"✅ {total_rows:,} rows loaded!")
+            progress_bar.empty()
+            return pd.concat(chunks, ignore_index=True)
+
+        # Small CSV: direct load
         try:
-            return pd.read_csv(uploaded_file)
-        except:
+            return pd.read_csv(uploaded_file, low_memory=False)
+        except Exception:
             uploaded_file.seek(0)
-            return pd.read_csv(uploaded_file, encoding='latin-1')
+            return pd.read_csv(uploaded_file, encoding='latin-1', low_memory=False)
+
+    # ── EXCEL ─────────────────────────────────────────────────────────────
+    xl = pd.ExcelFile(uploaded_file)
+    sheets = xl.sheet_names
+
+    if len(sheets) > 1:
+        if 'selected_sheet' not in st.session_state:
+            st.session_state.selected_sheet = sheets[0]
+        selected = st.sidebar.selectbox("📄 Excel Sheet", sheets, key="sheet_selector")
+        st.session_state.selected_sheet = selected
+        sheet_name = selected
     else:
-        xl = pd.ExcelFile(uploaded_file)
-        sheets = xl.sheet_names
-        if len(sheets) == 1:
-            return pd.read_excel(xl, sheet_name=sheets[0], header=None)
-        else:
-            # Multiple sheets — let user pick or auto-merge
-            if 'selected_sheet' not in st.session_state:
-                st.session_state.selected_sheet = sheets[0]
-            selected = st.sidebar.selectbox("📄 Select Sheet", sheets, key="sheet_selector")
-            st.session_state.selected_sheet = selected
-            return pd.read_excel(xl, sheet_name=selected, header=None)
+        sheet_name = sheets[0]
+
+    # Check row count first without loading data
+    df_peek = pd.read_excel(xl, sheet_name=sheet_name, header=None, nrows=1)
+    nrows_estimate = None
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(uploaded_file, read_only=True, data_only=True)
+        ws = wb[sheet_name if isinstance(sheet_name, str) else xl.sheet_names[sheet_name]]
+        nrows_estimate = ws.max_row
+        wb.close()
+        uploaded_file.seek(0)
+    except Exception:
+        pass
+
+    if nrows_estimate and nrows_estimate > LARGE_FILE_THRESHOLD:
+        progress_bar = st.progress(0, text=f"⚡ Loading {nrows_estimate:,} rows from Excel...")
+        df = pd.read_excel(xl, sheet_name=sheet_name, header=None)
+        progress_bar.progress(1.0, text=f"✅ {len(df):,} rows loaded!")
+        progress_bar.empty()
+        return df
+
+    return pd.read_excel(xl, sheet_name=sheet_name, header=None)
 
 
 def show_clean_report(fixes, df_clean, df_raw):
@@ -372,8 +461,16 @@ LIVE_MODULES = [
     "🛒  Retail & E-commerce",
     "🚚  Logistics",
     "🍽️  Restaurant",
+    "🏥  Healthcare",
+    "🏭  Manufacturing",
+    "📣  Marketing",
+    "🎓  Education",
+    "🏨  Hospitality",
+    "🌾  Agriculture",
+    "🏗️  Construction",
+    "🏦  Banking",
 ]
-SOON_MODULES = ["🏥  Healthcare", "🏭  Manufacturing", "📣  Marketing", "🎓  Education"]
+SOON_MODULES = ["⚖️  Legal", "🌍  NGO", "📡  Telecom", "🏘️  Real Estate"]
 
 if "module" not in st.session_state:
     st.session_state.module = "Sales Intelligence"
@@ -407,11 +504,86 @@ st.markdown("""
     <span class='fpill'>🚨 Smart alerts</span>
     <span class='fpill'>📄 PDF report</span>
     <span class='fpill'>🔒 Never stored</span>
+    <span class='fpill'>📊 1M+ rows supported</span>
+    <span class='fpill'>🗂️ Excel · CSV · JSON · Google Sheets</span>
 </div>
 """, unsafe_allow_html=True)
 
-# ── FILE UPLOAD ──────────────────────────────────────────────────────────────
-uploaded_file = st.file_uploader("Upload your Excel or CSV file", type=["xlsx","csv"], label_visibility="collapsed")
+# ── DATA SOURCE SELECTOR ─────────────────────────────────────────────────────
+src_tab1, src_tab2 = st.tabs(["📁 Upload File", "🔗 Google Sheets URL"])
+
+with src_tab1:
+    uploaded_file = st.file_uploader(
+        "Upload your data file",
+        type=["xlsx","csv","json"],
+        label_visibility="collapsed",
+        help="Supports Excel (.xlsx), CSV (.csv), JSON (.json) · Up to 200MB · Any number of rows"
+    )
+    gsheet_df = None
+
+with src_tab2:
+    st.markdown("""
+    <div style='background:#eef2ff;border-radius:10px;padding:14px 16px;margin-bottom:12px;font-size:0.85rem;color:#3730a3;border-left:3px solid #6366f1;'>
+    <b>How to share your Google Sheet:</b><br/>
+    Open Google Sheets → <b>File → Share → Anyone with the link → Viewer</b><br/>
+    Then paste the link below ↓
+    </div>
+    """, unsafe_allow_html=True)
+
+    gsheet_url = st.text_input(
+        "Paste Google Sheets URL",
+        placeholder="https://docs.google.com/spreadsheets/d/...",
+        label_visibility="collapsed"
+    )
+
+    gsheet_df = None
+    if gsheet_url and gsheet_url.strip():
+        try:
+            # Convert share URL to CSV export URL
+            def gsheet_to_csv_url(url):
+                import re
+                # Extract sheet ID
+                match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
+                if not match:
+                    return None, None
+                sheet_id = match.group(1)
+                # Extract gid (sheet tab) if present
+                gid_match = re.search(r'gid=(\d+)', url)
+                gid = gid_match.group(1) if gid_match else '0'
+                csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+                return csv_url, sheet_id
+
+            csv_url, sheet_id = gsheet_to_csv_url(gsheet_url.strip())
+            if not csv_url:
+                st.error("❌ Invalid Google Sheets URL. Make sure you copy the full link.")
+            else:
+                with st.spinner("⚡ Connecting to Google Sheets..."):
+                    response_df = pd.read_csv(csv_url)
+                    if len(response_df) > 0:
+                        gsheet_df = response_df
+                        st.success(f"✅ Connected! {len(gsheet_df):,} rows · {len(gsheet_df.columns)} columns loaded from Google Sheets")
+                    else:
+                        st.warning("⚠️ Sheet appears empty. Check the URL and sharing settings.")
+        except Exception as e:
+            err = str(e)
+            if '403' in err or 'Permission' in err or 'Forbidden' in err:
+                st.error("❌ Access denied. Make sure the sheet is shared as **Anyone with the link → Viewer**.")
+            elif '404' in err or 'Not Found' in err:
+                st.error("❌ Sheet not found. Check the URL is correct.")
+            else:
+                st.error(f"❌ Could not load sheet. Make sure it's publicly shared. ({err[:80]})")
+
+# ── Resolve active data source ────────────────────────────────────────────────
+# Priority: Google Sheets > uploaded file
+if gsheet_df is not None:
+    _active_file = gsheet_df
+    _active_name = "Google Sheets"
+elif uploaded_file is not None:
+    _active_file = uploaded_file
+    _active_name = uploaded_file.name
+else:
+    _active_file = None
+    _active_name = None
 
 # ── HELPER: section header ───────────────────────────────────────────────────
 def sh(icon, title, badge=None):
@@ -446,12 +618,12 @@ def clean_chart(fig, ax):
 # ════════════════════════════════════════════════════════════════════════════
 # SHOW LANDING IF NO FILE
 # ════════════════════════════════════════════════════════════════════════════
-if uploaded_file is None:
+if _active_file is None:
     st.markdown("""
     <div class='upload-hint'>
         <div style='font-size:2.5rem'>⚡</div>
-        <h3>Upload your data to get started</h3>
-        <p>Excel or CSV · Any business data · Results in under 60 seconds</p>
+        <h3>Upload your data or connect Google Sheets</h3>
+        <p>Excel · CSV · JSON · Google Sheets · Any size · Results in 60 seconds</p>
         <div style='display:flex; justify-content:center; gap:40px; flex-wrap:wrap; margin-top:24px;'>
             <div style='max-width:180px; text-align:left;'>
                 <div style='font-weight:700; color:#0a0a0a; margin-bottom:6px;'>📊 Instant Analysis</div>
@@ -472,8 +644,13 @@ if uploaded_file is None:
     st.stop()
 
 # ── Load & Smart Clean ───────────────────────────────────────────────────────
-df_raw = load_file(uploaded_file)
-df, fixes = smart_clean(df_raw, uploaded_file.name)
+if gsheet_df is not None:
+    # Google Sheets already loaded as DataFrame
+    df_raw = gsheet_df.copy()
+    df, fixes = smart_clean(df_raw, "Google Sheets")
+else:
+    df_raw = load_file(uploaded_file)
+    df, fixes = smart_clean(df_raw, uploaded_file.name)
 
 # ════════════════════════════════════════════════════════════════════════════
 # MODULE: INVENTORY INTELLIGENCE
@@ -1845,6 +2022,1441 @@ if module == "Restaurant":
         if not rest_alerts: abox("✅ Restaurant operations look healthy — no critical alerts.", "green")
         else:
             for k, m in rest_alerts: abox(m, k)
+    st.stop()
+
+# ════════════════════════════════════════════════════════════════════════════
+# MODULE: HEALTHCARE INTELLIGENCE
+# ════════════════════════════════════════════════════════════════════════════
+if module == "Healthcare":
+    df_hc = df.copy()
+    show_clean_report(fixes, df_hc, df_raw)
+
+    date_col   = next((c for c in df_hc.columns if 'date' in c.lower()), None)
+    dept_col   = next((c for c in df_hc.columns if 'department' in c.lower() or 'dept' in c.lower()), None)
+    doc_col    = next((c for c in df_hc.columns if 'doctor' in c.lower()), None)
+    diag_col   = next((c for c in df_hc.columns if 'diagnosis' in c.lower()), None)
+    ptype_col  = next((c for c in df_hc.columns if 'patient type' in c.lower()), None)
+    pay_col    = next((c for c in df_hc.columns if 'payment' in c.lower()), None)
+    rev_col    = next((c for c in df_hc.columns if 'revenue' in c.lower()), None)
+    budget_col = next((c for c in df_hc.columns if 'budget' in c.lower()), None)
+    bed_col    = next((c for c in df_hc.columns if 'bed days' in c.lower()), None)
+    avail_col  = next((c for c in df_hc.columns if 'beds available' in c.lower()), None)
+    readmit_col= next((c for c in df_hc.columns if 'readmit' in c.lower()), None)
+    rating_col = next((c for c in df_hc.columns if 'rating' in c.lower()), None)
+    city_col   = next((c for c in df_hc.columns if 'city' in c.lower()), None)
+
+    if date_col: df_hc[date_col] = pd.to_datetime(df_hc[date_col], dayfirst=True, errors='coerce')
+
+    total_rev     = df_hc[rev_col].sum() if rev_col else 0
+    total_patients= len(df_hc)
+    avg_rating    = df_hc[rating_col].mean() if rating_col else 0
+    readmit_rate  = (df_hc[readmit_col].str.upper()=='YES').mean()*100 if readmit_col else 0
+    num_doctors   = df_hc[doc_col].nunique() if doc_col else 0
+    budget_var    = (df_hc[rev_col].sum() - df_hc[budget_col].sum()) if rev_col and budget_col else 0
+
+    kpi_row([
+        (f"₹{total_rev:,.0f}", "Total Revenue", "indigo", None),
+        (f"{total_patients:,}", "Total Patients", "indigo", None),
+        (f"{num_doctors}", "Doctors", "indigo", None),
+        (f"{readmit_rate:.1f}%", "Readmission Rate", "red" if readmit_rate>10 else "amber" if readmit_rate>5 else "green", "Target: <5%"),
+        (f"{avg_rating:.1f}★", "Patient Rating", "green" if avg_rating>=4 else "amber", "Out of 5.0"),
+        (f"₹{abs(budget_var):,.0f}", "Budget Variance", "green" if budget_var>=0 else "red", "Surplus" if budget_var>=0 else "Deficit"),
+    ])
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🏥 Department Analysis", "👨‍⚕️ Doctor Performance", "💊 Patient Insights",
+        "💰 Revenue & Budget", "🚨 Smart Alerts"
+    ])
+
+    with tab1:
+        sh("🏥","Revenue by Department")
+        if dept_col and rev_col:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                dept_rev = df_hc.groupby(dept_col)[rev_col].sum().sort_values(ascending=False)
+                fig, ax = plt.subplots(figsize=(6,4))
+                clean_chart(fig, ax)
+                ax.barh(dept_rev.index, dept_rev.values, color='#6366f1')
+                ax.invert_yaxis()
+                ax.set_title("Revenue by Department", fontweight='bold')
+                for i,val in enumerate(dept_rev.values):
+                    ax.text(val, i, f'  ₹{val:,.0f}', va='center', fontsize=9)
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                dept_count = df_hc[dept_col].value_counts()
+                fig, ax = plt.subplots(figsize=(6,4))
+                clean_chart(fig, ax)
+                ax.pie(dept_count.values, labels=dept_count.index, autopct='%1.1f%%',
+                       colors=['#6366f1','#818cf8','#a5b4fc','#c7d2fe','#e0e7ff','#4f46e5','#10b981'],
+                       wedgeprops=dict(edgecolor='white',linewidth=2))
+                ax.set_title("Patient Volume by Department", fontweight='bold')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+
+        if dept_col and rev_col and budget_col:
+            sh("📊","Department Budget vs Actual")
+            dept_bva = df_hc.groupby(dept_col).agg({rev_col:'sum', budget_col:'sum'}).reset_index()
+            dept_bva.columns = ['Department','Actual Revenue','Budget']
+            dept_bva['Variance'] = dept_bva['Actual Revenue'] - dept_bva['Budget']
+            fig, ax = plt.subplots(figsize=(10,4))
+            clean_chart(fig, ax)
+            x = range(len(dept_bva))
+            ax.bar([i-0.2 for i in x], dept_bva['Budget'], 0.35, label='Budget', color='#e0e7ff', edgecolor='white')
+            ax.bar([i+0.2 for i in x], dept_bva['Actual Revenue'], 0.35, label='Actual',
+                   color=['#10b981' if v>=0 else '#ef4444' for v in dept_bva['Variance']], edgecolor='white')
+            ax.set_xticks(list(x)); ax.set_xticklabels(dept_bva['Department'], rotation=20, ha='right')
+            ax.legend(); ax.set_title("Budget vs Actual by Department", fontweight='bold')
+            plt.tight_layout(); st.pyplot(fig); plt.close()
+
+    with tab2:
+        if doc_col and rev_col:
+            sh("👨‍⚕️","Doctor Performance")
+            doc_stats = df_hc.groupby(doc_col).agg(
+                Patients=(rev_col,'count'), Revenue=(rev_col,'sum')
+            ).reset_index()
+            if rating_col:
+                doc_rating = df_hc.groupby(doc_col)[rating_col].mean().reset_index()
+                doc_stats = doc_stats.merge(doc_rating, on=doc_col)
+            doc_stats = doc_stats.sort_values('Revenue', ascending=False).reset_index(drop=True)
+            col_a, col_b = st.columns(2)
+            with col_a:
+                fig, ax = plt.subplots(figsize=(6,5))
+                clean_chart(fig, ax)
+                ax.barh(doc_stats[doc_col], doc_stats['Revenue'], color='#6366f1')
+                ax.invert_yaxis()
+                ax.set_title("Revenue per Doctor", fontweight='bold')
+                for i,val in enumerate(doc_stats['Revenue']):
+                    ax.text(val, i, f'  ₹{val:,.0f}', va='center', fontsize=8)
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                disp = doc_stats.copy()
+                disp['Revenue'] = disp['Revenue'].apply(lambda x: f"₹{x:,.0f}")
+                st.dataframe(disp, use_container_width=True, hide_index=True)
+
+    with tab3:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if diag_col:
+                sh("🔬","Top Diagnoses")
+                diag_count = df_hc[diag_col].value_counts().head(10)
+                fig, ax = plt.subplots(figsize=(6,5))
+                clean_chart(fig, ax)
+                diag_count.plot(kind='barh', ax=ax, color='#818cf8')
+                ax.invert_yaxis()
+                ax.set_title("Most Common Diagnoses", fontweight='bold')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+        with col_b:
+            if ptype_col:
+                sh("👥","Patient Type Breakdown")
+                pt_count = df_hc[ptype_col].value_counts()
+                fig, ax = plt.subplots(figsize=(5,5))
+                clean_chart(fig, ax)
+                ax.pie(pt_count.values, labels=pt_count.index, autopct='%1.1f%%',
+                       colors=['#6366f1','#10b981','#ef4444'],
+                       wedgeprops=dict(edgecolor='white',linewidth=2))
+                ax.set_title("Patient Type Split", fontweight='bold')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+        if pay_col and rev_col:
+            sh("💳","Revenue by Payment Type")
+            pay_rev = df_hc.groupby(pay_col)[rev_col].sum().sort_values(ascending=False)
+            fig, ax = plt.subplots(figsize=(10,3))
+            clean_chart(fig, ax)
+            bars = ax.bar(pay_rev.index, pay_rev.values, color=['#6366f1','#818cf8','#a5b4fc','#c7d2fe'], width=0.5)
+            for bar, val in zip(bars, pay_rev.values):
+                ax.text(bar.get_x()+bar.get_width()/2, bar.get_height(), f'₹{val:,.0f}', ha='center', va='bottom', fontsize=9)
+            ax.set_title("Revenue by Payment Type", fontweight='bold')
+            plt.tight_layout(); st.pyplot(fig); plt.close()
+
+    with tab4:
+        if date_col and rev_col:
+            sh("📈","Monthly Revenue Trend")
+            monthly = df_hc.groupby(df_hc[date_col].dt.to_period('M'))[rev_col].sum().reset_index()
+            monthly.columns = ['Month','Revenue']; monthly['Month'] = monthly['Month'].astype(str)
+            fig, ax = plt.subplots(figsize=(12,4))
+            clean_chart(fig, ax)
+            ax.fill_between(range(len(monthly)), monthly['Revenue'], alpha=0.12, color='#6366f1')
+            ax.plot(range(len(monthly)), monthly['Revenue'], color='#6366f1', linewidth=2.5, marker='o', markersize=5)
+            ax.set_xticks(range(len(monthly))); ax.set_xticklabels(monthly['Month'], rotation=45, ha='right', fontsize=8)
+            ax.set_title("Monthly Revenue Trend", fontweight='bold')
+            plt.tight_layout(); st.pyplot(fig); plt.close()
+
+    with tab5:
+        hc_alerts = []
+        if readmit_rate > 10: hc_alerts.append(('red', f"🔴 Readmission rate <b>{readmit_rate:.1f}%</b> is very high — review patient discharge protocols."))
+        elif readmit_rate > 5: hc_alerts.append(('amber', f"⚠️ Readmission rate <b>{readmit_rate:.1f}%</b> exceeds 5% target — needs attention."))
+        if avg_rating < 3.5 and avg_rating > 0: hc_alerts.append(('red', f"🔴 Patient rating <b>{avg_rating:.1f}/5</b> is low — investigate service quality."))
+        if budget_var < 0: hc_alerts.append(('amber', f"⚠️ Revenue is <b>₹{abs(budget_var):,.0f} below budget</b> — review department performance."))
+        if not hc_alerts: abox("✅ Healthcare operations look healthy — no critical alerts.", "green")
+        else:
+            for k,m in hc_alerts: abox(m, k)
+    st.stop()
+
+# ════════════════════════════════════════════════════════════════════════════
+# MODULE: MANUFACTURING & OPERATIONS INTELLIGENCE
+# ════════════════════════════════════════════════════════════════════════════
+if module == "Manufacturing":
+    df_mfg = df.copy()
+    show_clean_report(fixes, df_mfg, df_raw)
+
+    date_col    = next((c for c in df_mfg.columns if 'date' in c.lower()), None)
+    machine_col = next((c for c in df_mfg.columns if 'machine' in c.lower()), None)
+    prod_col    = next((c for c in df_mfg.columns if 'product' in c.lower()), None)
+    shift_col   = next((c for c in df_mfg.columns if 'shift' in c.lower()), None)
+    plan_col    = next((c for c in df_mfg.columns if 'planned' in c.lower()), None)
+    actual_col  = next((c for c in df_mfg.columns if 'actual output' in c.lower()), None)
+    defect_col  = next((c for c in df_mfg.columns if 'defect' in c.lower()), None)
+    down_col    = next((c for c in df_mfg.columns if 'downtime' in c.lower() and 'hour' in c.lower()), None)
+    dcause_col  = next((c for c in df_mfg.columns if 'cause' in c.lower()), None)
+    dcost_col   = next((c for c in df_mfg.columns if 'downtime cost' in c.lower()), None)
+    energy_col  = next((c for c in df_mfg.columns if 'energy' in c.lower()), None)
+    labour_col  = next((c for c in df_mfg.columns if 'labour' in c.lower()), None)
+    material_col= next((c for c in df_mfg.columns if 'material' in c.lower()), None)
+    oper_col    = next((c for c in df_mfg.columns if 'operator' in c.lower()), None)
+
+    if date_col: df_mfg[date_col] = pd.to_datetime(df_mfg[date_col], dayfirst=True, errors='coerce')
+
+    total_planned = df_mfg[plan_col].sum() if plan_col else 0
+    total_actual  = df_mfg[actual_col].sum() if actual_col else 0
+    efficiency    = (total_actual/total_planned*100) if total_planned > 0 else 0
+    total_defects = df_mfg[defect_col].sum() if defect_col else 0
+    defect_rate   = (total_defects/total_actual*100) if total_actual > 0 else 0
+    total_downtime= df_mfg[down_col].sum() if down_col else 0
+    total_dt_cost = df_mfg[dcost_col].sum() if dcost_col else 0
+    total_cost    = (df_mfg[labour_col].sum() if labour_col else 0) + (df_mfg[material_col].sum() if material_col else 0)
+
+    kpi_row([
+        (f"{efficiency:.1f}%", "Production Efficiency", "green" if efficiency>=90 else "amber" if efficiency>=75 else "red", "Target: 90%+"),
+        (f"{total_actual:,.0f}", "Units Produced", "indigo", f"of {total_planned:,.0f} planned"),
+        (f"{defect_rate:.1f}%", "Defect Rate", "green" if defect_rate<3 else "amber" if defect_rate<6 else "red", "Target: <3%"),
+        (f"{total_downtime:.0f} hrs", "Total Downtime", "red" if total_downtime>50 else "amber" if total_downtime>20 else "green", "Review causes"),
+        (f"₹{total_dt_cost:,.0f}", "Downtime Cost", "red" if total_dt_cost>100000 else "amber", "Lost production"),
+        (f"₹{total_cost:,.0f}", "Total Prod. Cost", "indigo", "Labour + Material"),
+    ])
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "⚙️ Production Output", "🔧 Downtime Analysis", "🏭 Machine & Shift",
+        "💰 Cost Analysis", "🚨 Smart Alerts"
+    ])
+
+    with tab1:
+        sh("⚙️","Production Efficiency")
+        if plan_col and actual_col:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if machine_col:
+                    mach_eff = df_mfg.groupby(machine_col).apply(
+                        lambda x: (x[actual_col].sum()/x[plan_col].sum()*100) if x[plan_col].sum()>0 else 0
+                    ).sort_values(ascending=False)
+                    fig, ax = plt.subplots(figsize=(6,4))
+                    clean_chart(fig, ax)
+                    bar_c = ['#10b981' if v>=90 else '#f59e0b' if v>=75 else '#ef4444' for v in mach_eff.values]
+                    ax.barh(mach_eff.index, mach_eff.values, color=bar_c)
+                    ax.axvline(90, color='#6366f1', linestyle='--', linewidth=1.5, label='Target 90%')
+                    ax.set_title("Efficiency by Machine", fontweight='bold')
+                    ax.set_xlabel("Efficiency %")
+                    ax.legend(fontsize=9)
+                    for i,val in enumerate(mach_eff.values):
+                        ax.text(val+0.3, i, f'{val:.1f}%', va='center', fontsize=9)
+                    plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                if shift_col:
+                    shift_eff = df_mfg.groupby(shift_col).apply(
+                        lambda x: (x[actual_col].sum()/x[plan_col].sum()*100) if x[plan_col].sum()>0 else 0
+                    )
+                    fig, ax = plt.subplots(figsize=(5,4))
+                    clean_chart(fig, ax)
+                    bar_c = ['#f59e0b','#6366f1','#1e1b4b']
+                    ax.bar(shift_eff.index, shift_eff.values, color=bar_c[:len(shift_eff)], width=0.4)
+                    ax.axhline(90, color='#ef4444', linestyle='--', linewidth=1.5, label='Target 90%')
+                    ax.set_title("Efficiency by Shift", fontweight='bold')
+                    ax.legend(fontsize=9)
+                    for i,(idx,val) in enumerate(shift_eff.items()):
+                        ax.text(i, val+0.5, f'{val:.1f}%', ha='center', fontweight='bold', fontsize=10)
+                    plt.tight_layout(); st.pyplot(fig); plt.close()
+
+        if date_col and actual_col:
+            sh("📈","Daily Production Trend")
+            daily = df_mfg.groupby(df_mfg[date_col].dt.to_period('M')).agg(
+                {plan_col:'sum', actual_col:'sum'}).reset_index()
+            daily.columns = ['Month','Planned','Actual']
+            daily['Month'] = daily['Month'].astype(str)
+            fig, ax = plt.subplots(figsize=(12,4))
+            clean_chart(fig, ax)
+            ax.plot(range(len(daily)), daily['Planned'], color='#e0e7ff', linewidth=2, linestyle='--', label='Planned', marker='s', markersize=4)
+            ax.plot(range(len(daily)), daily['Actual'], color='#6366f1', linewidth=2.5, label='Actual', marker='o', markersize=5)
+            ax.fill_between(range(len(daily)), daily['Planned'], daily['Actual'],
+                           where=[a<p for a,p in zip(daily['Actual'],daily['Planned'])],
+                           alpha=0.12, color='#ef4444', label='Shortfall')
+            ax.set_xticks(range(len(daily))); ax.set_xticklabels(daily['Month'], rotation=45, ha='right', fontsize=8)
+            ax.set_title("Planned vs Actual Production", fontweight='bold')
+            ax.legend(fontsize=9)
+            plt.tight_layout(); st.pyplot(fig); plt.close()
+
+    with tab2:
+        sh("🔧","Downtime Analysis")
+        if down_col:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if machine_col:
+                    mach_down = df_mfg.groupby(machine_col)[down_col].sum().sort_values(ascending=False)
+                    fig, ax = plt.subplots(figsize=(6,4))
+                    clean_chart(fig, ax)
+                    ax.barh(mach_down.index, mach_down.values, color='#ef4444', alpha=0.85)
+                    ax.invert_yaxis()
+                    ax.set_title("Downtime Hours by Machine", fontweight='bold')
+                    ax.set_xlabel("Hours")
+                    for i,val in enumerate(mach_down.values):
+                        ax.text(val+0.1, i, f'{val:.1f}h', va='center', fontsize=9)
+                    plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                if dcause_col:
+                    cause_down = df_mfg[df_mfg[dcause_col].str.lower()!='none'].groupby(dcause_col)[down_col].sum().sort_values(ascending=False)
+                    if len(cause_down) > 0:
+                        fig, ax = plt.subplots(figsize=(5,5))
+                        clean_chart(fig, ax)
+                        ax.pie(cause_down.values, labels=cause_down.index, autopct='%1.1f%%',
+                               colors=['#ef4444','#f59e0b','#6366f1','#818cf8'],
+                               wedgeprops=dict(edgecolor='white',linewidth=2))
+                        ax.set_title("Downtime by Cause", fontweight='bold')
+                        plt.tight_layout(); st.pyplot(fig); plt.close()
+
+        if defect_col and actual_col:
+            sh("🔍","Quality & Defect Analysis")
+            col_c, col_d = st.columns(2)
+            with col_c:
+                if machine_col:
+                    mach_defect = df_mfg.groupby(machine_col).apply(
+                        lambda x: (x[defect_col].sum()/x[actual_col].sum()*100) if x[actual_col].sum()>0 else 0
+                    ).sort_values(ascending=False)
+                    fig, ax = plt.subplots(figsize=(6,4))
+                    clean_chart(fig, ax)
+                    bar_c = ['#ef4444' if v>6 else '#f59e0b' if v>3 else '#10b981' for v in mach_defect.values]
+                    ax.barh(mach_defect.index, mach_defect.values, color=bar_c)
+                    ax.axvline(3, color='#6366f1', linestyle='--', linewidth=1.5, label='Target 3%')
+                    ax.set_title("Defect Rate by Machine", fontweight='bold')
+                    ax.legend(fontsize=9)
+                    plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_d:
+                if shift_col:
+                    shift_defect = df_mfg.groupby(shift_col).apply(
+                        lambda x: (x[defect_col].sum()/x[actual_col].sum()*100) if x[actual_col].sum()>0 else 0
+                    )
+                    fig, ax = plt.subplots(figsize=(5,4))
+                    clean_chart(fig, ax)
+                    bar_c = ['#f59e0b','#6366f1','#1e1b4b']
+                    ax.bar(shift_defect.index, shift_defect.values, color=bar_c[:len(shift_defect)], width=0.4)
+                    ax.axhline(3, color='#ef4444', linestyle='--', linewidth=1.5, label='Target 3%')
+                    ax.set_title("Defect Rate by Shift", fontweight='bold')
+                    ax.legend(fontsize=9)
+                    plt.tight_layout(); st.pyplot(fig); plt.close()
+
+    with tab3:
+        if machine_col and actual_col and plan_col:
+            sh("🏭","Machine Summary")
+            mach_summary = df_mfg.groupby(machine_col).agg({
+                plan_col:'sum', actual_col:'sum'
+            }).reset_index()
+            mach_summary.columns = ['Machine','Planned','Actual']
+            mach_summary['Efficiency %'] = (mach_summary['Actual']/mach_summary['Planned']*100).round(1)
+            if down_col:
+                mach_down2 = df_mfg.groupby(machine_col)[down_col].sum().reset_index()
+                mach_down2.columns = ['Machine','Downtime (hrs)']
+                mach_summary = mach_summary.merge(mach_down2, on='Machine')
+            if defect_col:
+                mach_def2 = df_mfg.groupby(machine_col)[defect_col].sum().reset_index()
+                mach_def2.columns = ['Machine','Total Defects']
+                mach_summary = mach_summary.merge(mach_def2, on='Machine')
+            st.dataframe(
+                mach_summary.style.background_gradient(subset=['Efficiency %'], cmap='RdYlGn'),
+                use_container_width=True, hide_index=True
+            )
+
+    with tab4:
+        sh("💰","Cost Breakdown")
+        cost_items = {}
+        if labour_col: cost_items['Labour'] = df_mfg[labour_col].sum()
+        if material_col: cost_items['Material'] = df_mfg[material_col].sum()
+        if dcost_col: cost_items['Downtime Loss'] = df_mfg[dcost_col].sum()
+        if energy_col: cost_items['Energy'] = df_mfg[energy_col].sum() * 8  # assume ₹8/kwh
+
+        if cost_items:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                fig, ax = plt.subplots(figsize=(5,5))
+                clean_chart(fig, ax)
+                ax.pie(list(cost_items.values()), labels=list(cost_items.keys()), autopct='%1.1f%%',
+                       colors=['#6366f1','#818cf8','#ef4444','#f59e0b'],
+                       wedgeprops=dict(edgecolor='white',linewidth=2))
+                ax.set_title("Cost Breakdown", fontweight='bold')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                for k,v in cost_items.items():
+                    pct = v/sum(cost_items.values())*100
+                    st.markdown(f"<div style='display:flex;justify-content:space-between;background:white;border-radius:10px;padding:12px 16px;margin:6px 0;border-left:4px solid #6366f1;box-shadow:0 1px 4px rgba(0,0,0,0.05);'><span style='font-weight:600'>{k}</span><span style='font-weight:800;color:#6366f1'>₹{v:,.0f} <span style='font-size:0.75rem;color:#6b7280'>({pct:.1f}%)</span></span></div>", unsafe_allow_html=True)
+
+    with tab5:
+        mfg_alerts = []
+        if efficiency < 75: mfg_alerts.append(('red', f"🔴 Production efficiency <b>{efficiency:.1f}%</b> is critically low — review machine performance and scheduling."))
+        elif efficiency < 90: mfg_alerts.append(('amber', f"⚠️ Production efficiency <b>{efficiency:.1f}%</b> below 90% target."))
+        if defect_rate > 6: mfg_alerts.append(('red', f"🔴 Defect rate <b>{defect_rate:.1f}%</b> is very high — immediate quality review needed."))
+        elif defect_rate > 3: mfg_alerts.append(('amber', f"⚠️ Defect rate <b>{defect_rate:.1f}%</b> exceeds 3% target."))
+        if total_downtime > 50: mfg_alerts.append(('amber', f"⚠️ <b>{total_downtime:.0f} hours</b> of downtime — ₹{total_dt_cost:,.0f} lost. Review maintenance schedule."))
+        if not mfg_alerts: abox("✅ Manufacturing operations look healthy — no critical alerts.", "green")
+        else:
+            for k,m in mfg_alerts: abox(m, k)
+    st.stop()
+
+# ════════════════════════════════════════════════════════════════════════════
+# MODULE: MARKETING INTELLIGENCE
+# ════════════════════════════════════════════════════════════════════════════
+if module == "Marketing":
+    df_mkt = df.copy()
+    show_clean_report(fixes, df_mkt, df_raw)
+
+    date_col   = next((c for c in df_mkt.columns if 'date' in c.lower()), None)
+    chan_col   = next((c for c in df_mkt.columns if 'channel' in c.lower()), None)
+    camp_col   = next((c for c in df_mkt.columns if 'campaign' in c.lower()), None)
+    spend_col  = next((c for c in df_mkt.columns if 'spend' in c.lower()), None)
+    imp_col    = next((c for c in df_mkt.columns if 'impression' in c.lower()), None)
+    click_col  = next((c for c in df_mkt.columns if 'click' in c.lower() and 'rate' not in c.lower()), None)
+    lead_col   = next((c for c in df_mkt.columns if 'lead' in c.lower()), None)
+    conv_col   = next((c for c in df_mkt.columns if 'conversion' in c.lower()), None)
+    rev_col    = next((c for c in df_mkt.columns if 'revenue' in c.lower()), None)
+    cac_col    = next((c for c in df_mkt.columns if 'cac' in c.lower()), None)
+    roas_col   = next((c for c in df_mkt.columns if 'roas' in c.lower()), None)
+    city_col   = next((c for c in df_mkt.columns if 'city' in c.lower()), None)
+
+    if date_col: df_mkt[date_col] = pd.to_datetime(df_mkt[date_col], dayfirst=True, errors='coerce')
+
+    total_spend = df_mkt[spend_col].sum() if spend_col else 0
+    total_rev   = df_mkt[rev_col].sum() if rev_col else 0
+    total_leads = df_mkt[lead_col].sum() if lead_col else 0
+    total_conv  = df_mkt[conv_col].sum() if conv_col else 0
+    overall_roas= round(total_rev/total_spend, 2) if total_spend > 0 else 0
+    avg_cac     = round(total_spend/total_conv, 0) if total_conv > 0 else 0
+    ctr         = round(df_mkt[click_col].sum()/df_mkt[imp_col].sum()*100, 2) if click_col and imp_col else 0
+    conv_rate   = round(total_conv/total_leads*100, 1) if total_leads > 0 else 0
+
+    kpi_row([
+        (f"₹{total_spend:,.0f}", "Total Ad Spend", "indigo", None),
+        (f"₹{total_rev:,.0f}", "Revenue Generated", "green", None),
+        (f"{overall_roas}x", "Overall ROAS", "green" if overall_roas>=3 else "amber" if overall_roas>=2 else "red", "Target: 3x+"),
+        (f"₹{avg_cac:,.0f}", "Avg CAC", "green" if avg_cac<5000 else "amber", "Cost per customer"),
+        (f"{total_leads:,.0f}", "Total Leads", "indigo", None),
+        (f"{conv_rate:.1f}%", "Lead→Sale Rate", "green" if conv_rate>=20 else "amber" if conv_rate>=10 else "red", "Conversion rate"),
+    ])
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Channel Performance", "📣 Campaign Analysis", "🔄 Funnel & Conversion",
+        "📈 Trends", "🚨 Smart Alerts"
+    ])
+
+    with tab1:
+        sh("📊","Channel Performance")
+        if chan_col and spend_col:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                chan_spend = df_mkt.groupby(chan_col)[spend_col].sum().sort_values(ascending=False)
+                fig, ax = plt.subplots(figsize=(6,4))
+                clean_chart(fig, ax)
+                ax.pie(chan_spend.values, labels=chan_spend.index, autopct='%1.1f%%',
+                       colors=['#6366f1','#818cf8','#a5b4fc','#c7d2fe','#e0e7ff','#4f46e5','#10b981','#34d399'],
+                       wedgeprops=dict(edgecolor='white',linewidth=2))
+                ax.set_title("Budget Split by Channel", fontweight='bold')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                if rev_col and conv_col:
+                    chan_stats = df_mkt.groupby(chan_col).agg({spend_col:'sum', rev_col:'sum', conv_col:'sum'}).reset_index()
+                    chan_stats.columns = ['Channel','Spend','Revenue','Conversions']
+                    chan_stats['ROAS'] = (chan_stats['Revenue']/chan_stats['Spend']).round(2)
+                    chan_stats['CAC'] = (chan_stats['Spend']/chan_stats['Conversions'].replace(0,1)).round(0)
+                    chan_stats = chan_stats.sort_values('ROAS', ascending=False)
+                    st.dataframe(chan_stats.style.background_gradient(subset=['ROAS'], cmap='Greens'), use_container_width=True, hide_index=True)
+                else:
+                    chan_stats = df_mkt.groupby(chan_col)[spend_col].sum().reset_index()
+                    st.dataframe(chan_stats, use_container_width=True, hide_index=True)
+
+            if rev_col and chan_col:
+                sh("💰","Revenue by Channel")
+                chan_rev = df_mkt.groupby(chan_col)[rev_col].sum().sort_values(ascending=False)
+                fig, ax = plt.subplots(figsize=(10,3))
+                clean_chart(fig, ax)
+                bars = ax.bar(chan_rev.index, chan_rev.values, color='#6366f1', alpha=0.9, width=0.5)
+                for bar, val in zip(bars, chan_rev.values):
+                    ax.text(bar.get_x()+bar.get_width()/2, bar.get_height(), f'₹{val:,.0f}', ha='center', va='bottom', fontsize=8, fontweight='bold')
+                ax.set_title("Revenue Generated by Channel", fontweight='bold')
+                plt.xticks(rotation=20, ha='right')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+
+    with tab2:
+        if camp_col and spend_col:
+            sh("📣","Campaign Performance")
+            camp_stats = df_mkt.groupby(camp_col).agg({spend_col:'sum'}).reset_index()
+            camp_stats.columns = ['Campaign','Total Spend']
+            if rev_col:
+                camp_rev = df_mkt.groupby(camp_col)[rev_col].sum().reset_index()
+                camp_rev.columns = ['Campaign','Revenue']
+                camp_stats = camp_stats.merge(camp_rev, on='Campaign')
+                camp_stats['ROAS'] = (camp_stats['Revenue']/camp_stats['Total Spend']).round(2)
+            if conv_col:
+                camp_conv = df_mkt.groupby(camp_col)[conv_col].sum().reset_index()
+                camp_conv.columns = ['Campaign','Conversions']
+                camp_stats = camp_stats.merge(camp_conv, on='Campaign')
+            camp_stats = camp_stats.sort_values('ROAS' if 'ROAS' in camp_stats.columns else 'Total Spend', ascending=False)
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if 'ROAS' in camp_stats.columns:
+                    fig, ax = plt.subplots(figsize=(6,5))
+                    clean_chart(fig, ax)
+                    bar_c = ['#10b981' if v>=3 else '#f59e0b' if v>=2 else '#ef4444' for v in camp_stats['ROAS']]
+                    ax.barh(camp_stats['Campaign'], camp_stats['ROAS'], color=bar_c)
+                    ax.axvline(3, color='#6366f1', linestyle='--', linewidth=1.5, label='Target 3x')
+                    ax.set_title("ROAS by Campaign", fontweight='bold')
+                    ax.legend(fontsize=9)
+                    plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                st.dataframe(camp_stats.reset_index(drop=True), use_container_width=True, hide_index=True)
+
+    with tab3:
+        sh("🔄","Marketing Funnel")
+        if imp_col and click_col and lead_col and conv_col:
+            funnel_data = {
+                'Impressions': df_mkt[imp_col].sum(),
+                'Clicks': df_mkt[click_col].sum(),
+                'Leads': df_mkt[lead_col].sum(),
+                'Conversions': df_mkt[conv_col].sum(),
+            }
+            fig, ax = plt.subplots(figsize=(8,5))
+            clean_chart(fig, ax)
+            colors_f = ['#6366f1','#818cf8','#a5b4fc','#10b981']
+            bars = ax.barh(list(funnel_data.keys()), list(funnel_data.values()), color=colors_f, height=0.5)
+            for bar, (label, val) in zip(bars, funnel_data.items()):
+                ax.text(val+max(funnel_data.values())*0.01, bar.get_y()+bar.get_height()/2,
+                        f'{val:,.0f}', va='center', fontweight='bold', fontsize=11)
+            ax.set_title("Marketing Funnel — Impressions to Conversions", fontweight='bold')
+            ax.invert_yaxis()
+            plt.tight_layout(); st.pyplot(fig); plt.close()
+
+            col_a, col_b, col_c = st.columns(3)
+            col_a.metric("Click-Through Rate", f"{ctr:.2f}%", "Impressions → Clicks")
+            col_b.metric("Lead Conversion", f"{conv_rate:.1f}%", "Leads → Sales")
+            col_c.metric("Cost per Lead", f"₹{total_spend/total_leads:.0f}" if total_leads > 0 else "N/A", "Total spend / leads")
+
+    with tab4:
+        if date_col and spend_col and rev_col:
+            sh("📈","Spend vs Revenue Trend")
+            monthly = df_mkt.groupby(df_mkt[date_col].dt.to_period('M')).agg({spend_col:'sum', rev_col:'sum'}).reset_index()
+            monthly.columns = ['Month','Spend','Revenue']
+            monthly['Month'] = monthly['Month'].astype(str)
+            fig, ax = plt.subplots(figsize=(12,4))
+            clean_chart(fig, ax)
+            ax2 = ax.twinx()
+            ax.bar(range(len(monthly)), monthly['Spend'], color='#e0e7ff', label='Spend', alpha=0.8)
+            ax2.plot(range(len(monthly)), monthly['Revenue'], color='#6366f1', linewidth=2.5, marker='o', markersize=5, label='Revenue')
+            ax.set_xticks(range(len(monthly))); ax.set_xticklabels(monthly['Month'], rotation=45, ha='right', fontsize=8)
+            ax.set_ylabel("Spend (₹)", color='#9ca3af'); ax2.set_ylabel("Revenue (₹)", color='#6366f1')
+            ax.set_title("Monthly Spend vs Revenue", fontweight='bold')
+            lines1, labels1 = ax.get_legend_handles_labels()
+            lines2, labels2 = ax2.get_legend_handles_labels()
+            ax.legend(lines1+lines2, labels1+labels2, fontsize=9)
+            plt.tight_layout(); st.pyplot(fig); plt.close()
+
+    with tab5:
+        mkt_alerts = []
+        if overall_roas < 2: mkt_alerts.append(('red', f"🔴 Overall ROAS is <b>{overall_roas}x</b> — below 2x minimum. Ad spend is not generating enough revenue."))
+        elif overall_roas < 3: mkt_alerts.append(('amber', f"⚠️ ROAS <b>{overall_roas}x</b> is below 3x target. Optimise underperforming campaigns."))
+        if avg_cac > 10000: mkt_alerts.append(('amber', f"⚠️ Customer acquisition cost <b>₹{avg_cac:,.0f}</b> is high. Review channel efficiency."))
+        if conv_rate < 10: mkt_alerts.append(('amber', f"⚠️ Lead-to-sale rate only <b>{conv_rate:.1f}%</b> — sales follow-up process needs improvement."))
+        if not mkt_alerts: abox("✅ Marketing performance looks healthy — no critical alerts.", "green")
+        else:
+            for k,m in mkt_alerts: abox(m, k)
+    st.stop()
+
+# ════════════════════════════════════════════════════════════════════════════
+# MODULE: EDUCATION INTELLIGENCE
+# ════════════════════════════════════════════════════════════════════════════
+if module == "Education":
+    df_edu = df.copy()
+    show_clean_report(fixes, df_edu, df_raw)
+
+    date_col    = next((c for c in df_edu.columns if 'date' in c.lower()), None)
+    class_col   = next((c for c in df_edu.columns if 'class' in c.lower()), None)
+    subj_col    = next((c for c in df_edu.columns if 'subject' in c.lower()), None)
+    teacher_col = next((c for c in df_edu.columns if 'teacher' in c.lower()), None)
+    total_s_col = next((c for c in df_edu.columns if 'total student' in c.lower()), None)
+    present_col = next((c for c in df_edu.columns if 'present' in c.lower()), None)
+    score_col   = next((c for c in df_edu.columns if 'avg score' in c.lower() or 'score' in c.lower()), None)
+    pass_col    = next((c for c in df_edu.columns if 'pass' in c.lower()), None)
+    fee_col     = next((c for c in df_edu.columns if 'fee charged' in c.lower()), None)
+    paid_col    = next((c for c in df_edu.columns if 'fee paid' in c.lower()), None)
+    gender_col  = next((c for c in df_edu.columns if 'gender' in c.lower()), None)
+    status_col  = next((c for c in df_edu.columns if 'status' in c.lower()), None)
+
+    if date_col: df_edu[date_col] = pd.to_datetime(df_edu[date_col], dayfirst=True, errors='coerce')
+    if total_s_col and present_col:
+        df_edu['Attendance %'] = (df_edu[present_col]/df_edu[total_s_col]*100).round(1)
+
+    total_records = len(df_edu)
+    avg_score     = df_edu[score_col].mean() if score_col else 0
+    avg_attend    = df_edu['Attendance %'].mean() if 'Attendance %' in df_edu.columns else 0
+    pass_rate     = (df_edu[pass_col].str.upper()=='YES').mean()*100 if pass_col else 0
+    total_fee     = df_edu[fee_col].sum() if fee_col else 0
+    total_paid    = df_edu[paid_col].sum() if paid_col else 0
+    fee_collection= round(total_paid/total_fee*100, 1) if total_fee > 0 else 0
+    dropout_rate  = (df_edu[status_col].str.title()=='Dropped Out').mean()*100 if status_col else 0
+
+    kpi_row([
+        (f"{avg_score:.1f}%", "Avg Student Score", "green" if avg_score>=60 else "amber" if avg_score>=40 else "red", "Class average"),
+        (f"{avg_attend:.1f}%", "Avg Attendance", "green" if avg_attend>=80 else "amber" if avg_attend>=70 else "red", "Target: 80%+"),
+        (f"{pass_rate:.1f}%", "Pass Rate", "green" if pass_rate>=85 else "amber" if pass_rate>=70 else "red", "Target: 85%+"),
+        (f"{fee_collection:.1f}%", "Fee Collection", "green" if fee_collection>=90 else "amber" if fee_collection>=75 else "red", f"₹{total_paid:,.0f} collected"),
+        (f"{dropout_rate:.1f}%", "Dropout Rate", "red" if dropout_rate>10 else "amber" if dropout_rate>5 else "green", "Target: <5%"),
+        (f"₹{total_fee-total_paid:,.0f}", "Fee Outstanding", "red" if (total_fee-total_paid)>0 else "green", "Needs collection"),
+    ])
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📚 Academic Performance", "📅 Attendance Analysis", "👨‍🏫 Teacher Performance",
+        "💰 Fee Collection", "🚨 Smart Alerts"
+    ])
+
+    with tab1:
+        sh("📚","Score Analysis")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if score_col:
+                fig, ax = plt.subplots(figsize=(6,4))
+                clean_chart(fig, ax)
+                ax.hist(df_edu[score_col].dropna(), bins=15, color='#6366f1', edgecolor='white', linewidth=1.5)
+                ax.axvline(avg_score, color='#ef4444', linestyle='--', linewidth=2, label=f'Avg: {avg_score:.1f}%')
+                ax.axvline(40, color='#f59e0b', linestyle=':', linewidth=1.5, label='Pass mark: 40%')
+                ax.set_title("Score Distribution", fontweight='bold')
+                ax.set_xlabel("Score %")
+                ax.legend(fontsize=9)
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+        with col_b:
+            if subj_col and score_col:
+                subj_score = df_edu.groupby(subj_col)[score_col].mean().sort_values()
+                fig, ax = plt.subplots(figsize=(6,4))
+                clean_chart(fig, ax)
+                bar_c = ['#ef4444' if v<50 else '#f59e0b' if v<65 else '#10b981' for v in subj_score.values]
+                ax.barh(subj_score.index, subj_score.values, color=bar_c)
+                ax.axvline(40, color='#ef4444', linestyle='--', linewidth=1.5, label='Pass: 40%')
+                ax.set_title("Avg Score by Subject", fontweight='bold')
+                ax.legend(fontsize=9)
+                for i,val in enumerate(subj_score.values):
+                    ax.text(val+0.3, i, f'{val:.1f}%', va='center', fontsize=9)
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+
+        if class_col and score_col:
+            sh("🏫","Performance by Class")
+            class_perf = df_edu.groupby(class_col)[score_col].mean().sort_values(ascending=False)
+            fig, ax = plt.subplots(figsize=(10,3))
+            clean_chart(fig, ax)
+            bar_c = ['#10b981' if v>=65 else '#f59e0b' if v>=50 else '#ef4444' for v in class_perf.values]
+            bars = ax.bar(class_perf.index, class_perf.values, color=bar_c, width=0.5)
+            ax.axhline(40, color='#ef4444', linestyle='--', linewidth=1.5, label='Pass mark')
+            for bar, val in zip(bars, class_perf.values):
+                ax.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.3, f'{val:.1f}%', ha='center', fontsize=9, fontweight='bold')
+            ax.set_title("Average Score by Class", fontweight='bold')
+            ax.legend(fontsize=9)
+            plt.tight_layout(); st.pyplot(fig); plt.close()
+
+    with tab2:
+        sh("📅","Attendance Analysis")
+        if 'Attendance %' in df_edu.columns:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if class_col:
+                    class_att = df_edu.groupby(class_col)['Attendance %'].mean().sort_values()
+                    fig, ax = plt.subplots(figsize=(6,4))
+                    clean_chart(fig, ax)
+                    bar_c = ['#ef4444' if v<70 else '#f59e0b' if v<80 else '#10b981' for v in class_att.values]
+                    ax.barh(class_att.index, class_att.values, color=bar_c)
+                    ax.axvline(80, color='#6366f1', linestyle='--', linewidth=1.5, label='Target 80%')
+                    ax.set_title("Attendance % by Class", fontweight='bold')
+                    ax.legend(fontsize=9)
+                    for i,val in enumerate(class_att.values):
+                        ax.text(val+0.2, i, f'{val:.1f}%', va='center', fontsize=9)
+                    plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                low_att = df_edu[df_edu['Attendance %'] < 70]
+                if len(low_att) > 0:
+                    abox(f"⚠️ <b>{len(low_att)} records</b> show attendance below 70% — risk of student disengagement.", "amber")
+                high_att = (df_edu['Attendance %'] >= 90).sum()
+                abox(f"✅ <b>{high_att} records</b> show 90%+ attendance — excellent engagement.", "green")
+
+                fig, ax = plt.subplots(figsize=(5,4))
+                clean_chart(fig, ax)
+                ax.hist(df_edu['Attendance %'].dropna(), bins=15, color='#818cf8', edgecolor='white', linewidth=1.5)
+                ax.axvline(80, color='#ef4444', linestyle='--', linewidth=1.5, label='Target 80%')
+                ax.set_title("Attendance Distribution", fontweight='bold')
+                ax.legend(fontsize=9)
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+
+    with tab3:
+        if teacher_col and score_col:
+            sh("👨‍🏫","Teacher Performance")
+            teach_stats = df_edu.groupby(teacher_col).agg({
+                score_col:'mean'
+            }).reset_index()
+            teach_stats.columns = ['Teacher','Avg Student Score']
+            if 'Attendance %' in df_edu.columns:
+                teach_att = df_edu.groupby(teacher_col)['Attendance %'].mean().reset_index()
+                teach_att.columns = ['Teacher','Avg Attendance %']
+                teach_stats = teach_stats.merge(teach_att, on='Teacher')
+            teach_stats = teach_stats.sort_values('Avg Student Score', ascending=False).reset_index(drop=True)
+            col_a, col_b = st.columns(2)
+            with col_a:
+                fig, ax = plt.subplots(figsize=(6,5))
+                clean_chart(fig, ax)
+                bar_c = ['#10b981' if v>=65 else '#f59e0b' if v>=50 else '#ef4444' for v in teach_stats['Avg Student Score']]
+                ax.barh(teach_stats['Teacher'], teach_stats['Avg Student Score'], color=bar_c)
+                ax.invert_yaxis()
+                ax.set_title("Avg Student Score by Teacher", fontweight='bold')
+                for i,val in enumerate(teach_stats['Avg Student Score']):
+                    ax.text(val+0.2, i, f'{val:.1f}%', va='center', fontsize=9)
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                st.dataframe(teach_stats.style.background_gradient(subset=['Avg Student Score'], cmap='RdYlGn'), use_container_width=True, hide_index=True)
+
+    with tab4:
+        if fee_col and paid_col:
+            sh("💰","Fee Collection Analysis")
+            outstanding = total_fee - total_paid
+            kpi_row([
+                (f"₹{total_fee:,.0f}", "Total Fee Charged", "indigo", None),
+                (f"₹{total_paid:,.0f}", "Fee Collected", "green", f"{fee_collection:.1f}%"),
+                (f"₹{outstanding:,.0f}", "Outstanding", "red" if outstanding > 0 else "green", "Needs follow-up"),
+            ])
+            if class_col:
+                sh("📋","Fee Collection by Class")
+                class_fee = df_edu.groupby(class_col).agg({fee_col:'sum', paid_col:'sum'}).reset_index()
+                class_fee.columns = ['Class','Total Fee','Collected']
+                class_fee['Collection %'] = (class_fee['Collected']/class_fee['Total Fee']*100).round(1)
+                class_fee['Outstanding'] = class_fee['Total Fee'] - class_fee['Collected']
+                fig, ax = plt.subplots(figsize=(10,3))
+                clean_chart(fig, ax)
+                x = range(len(class_fee))
+                ax.bar([i-0.2 for i in x], class_fee['Total Fee'], 0.35, label='Charged', color='#e0e7ff', edgecolor='white')
+                ax.bar([i+0.2 for i in x], class_fee['Collected'], 0.35, label='Collected', color='#10b981', edgecolor='white')
+                ax.set_xticks(list(x)); ax.set_xticklabels(class_fee['Class'], rotation=20, ha='right')
+                ax.legend(); ax.set_title("Fee Charged vs Collected by Class", fontweight='bold')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+                st.dataframe(class_fee.style.background_gradient(subset=['Collection %'], cmap='RdYlGn'), use_container_width=True, hide_index=True)
+
+    with tab5:
+        edu_alerts = []
+        if avg_score < 50: edu_alerts.append(('red', f"🔴 Average score <b>{avg_score:.1f}%</b> is critically low — urgent academic intervention needed."))
+        elif avg_score < 60: edu_alerts.append(('amber', f"⚠️ Average score <b>{avg_score:.1f}%</b> is below 60% — review teaching methods."))
+        if avg_attend < 70: edu_alerts.append(('red', f"🔴 Average attendance <b>{avg_attend:.1f}%</b> is critically low."))
+        elif avg_attend < 80: edu_alerts.append(('amber', f"⚠️ Attendance <b>{avg_attend:.1f}%</b> below 80% target."))
+        if dropout_rate > 10: edu_alerts.append(('red', f"🔴 Dropout rate <b>{dropout_rate:.1f}%</b> is very high — investigate causes."))
+        if fee_collection < 80: edu_alerts.append(('amber', f"⚠️ Fee collection rate <b>{fee_collection:.1f}%</b> — ₹{(total_fee-total_paid):,.0f} outstanding."))
+        if not edu_alerts: abox("✅ School performance looks healthy — no critical alerts.", "green")
+        else:
+            for k,m in edu_alerts: abox(m, k)
+    st.stop()
+
+# ════════════════════════════════════════════════════════════════════════════
+# MODULE: HOTEL & HOSPITALITY INTELLIGENCE
+# ════════════════════════════════════════════════════════════════════════════
+if module == "Hospitality":
+    df_hot = df.copy()
+    show_clean_report(fixes, df_hot, df_raw)
+
+    date_col   = next((c for c in df_hot.columns if 'date' in c.lower()), None)
+    rtype_col  = next((c for c in df_hot.columns if 'room type' in c.lower()), None)
+    source_col = next((c for c in df_hot.columns if 'booking' in c.lower() or 'source' in c.lower()), None)
+    city_col   = next((c for c in df_hot.columns if 'city' in c.lower()), None)
+    nights_col = next((c for c in df_hot.columns if 'night' in c.lower()), None)
+    rate_col   = next((c for c in df_hot.columns if 'room rate' in c.lower()), None)
+    occ_col    = next((c for c in df_hot.columns if 'rooms occupied' in c.lower()), None)
+    total_r_col= next((c for c in df_hot.columns if 'total rooms' in c.lower()), None)
+    fnb_col    = next((c for c in df_hot.columns if 'f&b' in c.lower() or 'food' in c.lower()), None)
+    spa_col    = next((c for c in df_hot.columns if 'spa' in c.lower()), None)
+    rev_col    = next((c for c in df_hot.columns if 'total revenue' in c.lower()), None)
+    rating_col = next((c for c in df_hot.columns if 'rating' in c.lower()), None)
+    cancel_col = next((c for c in df_hot.columns if 'cancel' in c.lower()), None)
+    staff_col  = next((c for c in df_hot.columns if 'staff cost' in c.lower()), None)
+    opcost_col = next((c for c in df_hot.columns if 'operating' in c.lower()), None)
+
+    if date_col: df_hot[date_col] = pd.to_datetime(df_hot[date_col], dayfirst=True, errors='coerce')
+    if occ_col and total_r_col:
+        df_hot['Occupancy %'] = (df_hot[occ_col]/df_hot[total_r_col]*100).round(1)
+
+    total_rev     = df_hot[rev_col].sum() if rev_col else 0
+    avg_occ       = df_hot['Occupancy %'].mean() if 'Occupancy %' in df_hot.columns else 0
+    avg_rating    = df_hot[rating_col].mean() if rating_col else 0
+    cancel_rate   = (df_hot[cancel_col].str.upper()=='YES').mean()*100 if cancel_col else 0
+    avg_rate      = df_hot[rate_col].mean() if rate_col else 0
+    total_cost    = (df_hot[staff_col].sum() if staff_col else 0) + (df_hot[opcost_col].sum() if opcost_col else 0)
+    net_profit    = total_rev - total_cost
+    revpar        = round(avg_rate * avg_occ/100, 0)  # Revenue per available room
+
+    kpi_row([
+        (f"₹{total_rev:,.0f}", "Total Revenue", "indigo", None),
+        (f"{avg_occ:.1f}%", "Avg Occupancy", "green" if avg_occ>=70 else "amber" if avg_occ>=50 else "red", "Target: 70%+"),
+        (f"₹{avg_rate:,.0f}", "Avg Room Rate", "indigo", "ADR"),
+        (f"₹{revpar:,.0f}", "RevPAR", "indigo", "Revenue per avail. room"),
+        (f"{avg_rating:.1f}★", "Guest Rating", "green" if avg_rating>=4 else "amber", "Out of 5.0"),
+        (f"{cancel_rate:.1f}%", "Cancellation Rate", "red" if cancel_rate>15 else "amber" if cancel_rate>8 else "green", "Target: <8%"),
+    ])
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🏨 Occupancy & Revenue","🛏️ Room Analysis","📱 Booking Sources","💰 Profitability","🚨 Smart Alerts"
+    ])
+
+    with tab1:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if date_col and rev_col:
+                sh("📈","Monthly Revenue Trend")
+                monthly = df_hot.groupby(df_hot[date_col].dt.to_period('M'))[rev_col].sum().reset_index()
+                monthly.columns = ['Month','Revenue']; monthly['Month'] = monthly['Month'].astype(str)
+                fig, ax = plt.subplots(figsize=(6,4))
+                clean_chart(fig, ax)
+                ax.fill_between(range(len(monthly)), monthly['Revenue'], alpha=0.12, color='#6366f1')
+                ax.plot(range(len(monthly)), monthly['Revenue'], color='#6366f1', linewidth=2.5, marker='o', markersize=5)
+                ax.set_xticks(range(len(monthly))); ax.set_xticklabels(monthly['Month'], rotation=45, ha='right', fontsize=8)
+                ax.set_title("Monthly Revenue", fontweight='bold')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+        with col_b:
+            if 'Occupancy %' in df_hot.columns and date_col:
+                sh("📊","Monthly Occupancy Rate")
+                monthly_occ = df_hot.groupby(df_hot[date_col].dt.to_period('M'))['Occupancy %'].mean().reset_index()
+                monthly_occ.columns = ['Month','Occ %']; monthly_occ['Month'] = monthly_occ['Month'].astype(str)
+                fig, ax = plt.subplots(figsize=(6,4))
+                clean_chart(fig, ax)
+                bar_c = ['#10b981' if v>=70 else '#f59e0b' if v>=50 else '#ef4444' for v in monthly_occ['Occ %']]
+                ax.bar(range(len(monthly_occ)), monthly_occ['Occ %'], color=bar_c, width=0.6)
+                ax.axhline(70, color='#6366f1', linestyle='--', linewidth=1.5, label='Target 70%')
+                ax.set_xticks(range(len(monthly_occ))); ax.set_xticklabels(monthly_occ['Month'], rotation=45, ha='right', fontsize=8)
+                ax.legend(fontsize=9); ax.set_title("Monthly Occupancy %", fontweight='bold')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+
+        if fnb_col and spa_col and rev_col:
+            sh("🍽️","Revenue Breakdown")
+            room_rev = df_hot[rate_col].sum() if rate_col else 0
+            fnb_rev  = df_hot[fnb_col].sum()
+            spa_rev  = df_hot[spa_col].sum()
+            other_rev = total_rev - room_rev - fnb_rev - spa_rev
+            rev_breakdown = {'Room Revenue': room_rev, 'F&B': fnb_rev, 'Spa': spa_rev}
+            if other_rev > 0: rev_breakdown['Other'] = other_rev
+            fig, ax = plt.subplots(figsize=(6,4))
+            clean_chart(fig, ax)
+            ax.pie(list(rev_breakdown.values()), labels=list(rev_breakdown.keys()), autopct='%1.1f%%',
+                   colors=['#6366f1','#f59e0b','#10b981','#818cf8'],
+                   wedgeprops=dict(edgecolor='white',linewidth=2))
+            ax.set_title("Revenue Source Breakdown", fontweight='bold')
+            plt.tight_layout(); st.pyplot(fig); plt.close()
+
+    with tab2:
+        if rtype_col and rev_col:
+            sh("🛏️","Room Type Performance")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                rtype_rev = df_hot.groupby(rtype_col)[rev_col].sum().sort_values(ascending=False)
+                fig, ax = plt.subplots(figsize=(6,4))
+                clean_chart(fig, ax)
+                ax.barh(rtype_rev.index, rtype_rev.values, color='#6366f1')
+                ax.invert_yaxis()
+                ax.set_title("Revenue by Room Type", fontweight='bold')
+                for i,val in enumerate(rtype_rev.values):
+                    ax.text(val,i,f'  ₹{val:,.0f}',va='center',fontsize=9)
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                rtype_stats = df_hot.groupby(rtype_col).agg({rev_col:'sum', rate_col:'mean'}).reset_index()
+                rtype_stats.columns = ['Room Type','Total Revenue','Avg Rate']
+                if rating_col:
+                    rtype_rat = df_hot.groupby(rtype_col)[rating_col].mean().reset_index()
+                    rtype_rat.columns = ['Room Type','Avg Rating']
+                    rtype_stats = rtype_stats.merge(rtype_rat, on='Room Type')
+                rtype_stats = rtype_stats.sort_values('Total Revenue', ascending=False)
+                st.dataframe(rtype_stats.reset_index(drop=True), use_container_width=True, hide_index=True)
+
+    with tab3:
+        if source_col and rev_col:
+            sh("📱","Booking Source Analysis")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                src_rev = df_hot.groupby(source_col)[rev_col].sum().sort_values(ascending=False)
+                fig, ax = plt.subplots(figsize=(6,5))
+                clean_chart(fig, ax)
+                ax.pie(src_rev.values, labels=src_rev.index, autopct='%1.1f%%',
+                       colors=['#6366f1','#818cf8','#a5b4fc','#c7d2fe','#e0e7ff','#4f46e5','#10b981'],
+                       wedgeprops=dict(edgecolor='white',linewidth=2))
+                ax.set_title("Revenue by Booking Source", fontweight='bold')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                src_stats = df_hot.groupby(source_col).agg(Bookings=(rev_col,'count'), Revenue=(rev_col,'sum')).reset_index()
+                src_stats['Avg Booking Value'] = (src_stats['Revenue']/src_stats['Bookings']).round(0)
+                src_stats['Revenue'] = src_stats['Revenue'].apply(lambda x: f"₹{x:,.0f}")
+                src_stats['Avg Booking Value'] = src_stats['Avg Booking Value'].apply(lambda x: f"₹{x:,.0f}")
+                st.dataframe(src_stats.sort_values('Bookings', ascending=False).reset_index(drop=True), use_container_width=True, hide_index=True)
+                abox("💡 <b>Direct bookings</b> are most profitable — no OTA commission (15-25%). Focus on driving direct traffic.", "blue")
+
+    with tab4:
+        sh("💰","Profitability Analysis")
+        kpi_row([
+            (f"₹{total_rev:,.0f}", "Total Revenue", "green", None),
+            (f"₹{total_cost:,.0f}", "Total Operating Cost", "red", None),
+            (f"₹{net_profit:,.0f}", "Net Profit", "green" if net_profit>=0 else "red", f"{net_profit/total_rev*100:.1f}% margin" if total_rev>0 else None),
+        ])
+        if staff_col and opcost_col:
+            cost_breakdown = {'Staff Cost': df_hot[staff_col].sum(), 'Operating Cost': df_hot[opcost_col].sum()}
+            fig, ax = plt.subplots(figsize=(6,4))
+            clean_chart(fig, ax)
+            ax.bar(list(cost_breakdown.keys()), list(cost_breakdown.values()), color=['#6366f1','#ef4444'], width=0.4)
+            ax.set_title("Cost Breakdown", fontweight='bold')
+            for i,(k,v) in enumerate(cost_breakdown.items()):
+                ax.text(i, v, f'₹{v:,.0f}', ha='center', va='bottom', fontweight='bold')
+            plt.tight_layout(); st.pyplot(fig); plt.close()
+
+    with tab5:
+        hot_alerts = []
+        if avg_occ < 50: hot_alerts.append(('red', f"🔴 Occupancy rate <b>{avg_occ:.1f}%</b> is critically low — run promotions to fill rooms."))
+        elif avg_occ < 70: hot_alerts.append(('amber', f"⚠️ Occupancy <b>{avg_occ:.1f}%</b> below 70% target — boost marketing spend."))
+        if cancel_rate > 15: hot_alerts.append(('red', f"🔴 Cancellation rate <b>{cancel_rate:.1f}%</b> is very high — review booking policy."))
+        if avg_rating < 3.5 and avg_rating > 0: hot_alerts.append(('red', f"🔴 Guest rating <b>{avg_rating:.1f}/5</b> is low — immediate service quality review."))
+        if net_profit < 0: hot_alerts.append(('red', f"🔴 Hotel is running at a <b>loss of ₹{abs(net_profit):,.0f}</b> — review cost structure."))
+        if not hot_alerts: abox("✅ Hotel operations look healthy — no critical alerts.", "green")
+        else:
+            for k,m in hot_alerts: abox(m, k)
+    st.stop()
+
+# ════════════════════════════════════════════════════════════════════════════
+# MODULE: AGRICULTURE & FARMING INTELLIGENCE
+# ════════════════════════════════════════════════════════════════════════════
+if module == "Agriculture":
+    df_agr = df.copy()
+    show_clean_report(fixes, df_agr, df_raw)
+
+    date_col    = next((c for c in df_agr.columns if 'date' in c.lower()), None)
+    crop_col    = next((c for c in df_agr.columns if 'crop' in c.lower()), None)
+    season_col  = next((c for c in df_agr.columns if 'season' in c.lower()), None)
+    state_col   = next((c for c in df_agr.columns if 'state' in c.lower()), None)
+    area_col    = next((c for c in df_agr.columns if 'area' in c.lower()), None)
+    exp_yield_col = next((c for c in df_agr.columns if 'expected yield' in c.lower()), None)
+    act_yield_col = next((c for c in df_agr.columns if 'actual yield' in c.lower()), None)
+    price_col   = next((c for c in df_agr.columns if 'market price' in c.lower()), None)
+    msp_col     = next((c for c in df_agr.columns if 'msp' in c.lower()), None)
+    rev_col     = next((c for c in df_agr.columns if 'revenue' in c.lower()), None)
+    cost_col    = next((c for c in df_agr.columns if 'total cost' in c.lower()), None)
+    profit_col  = next((c for c in df_agr.columns if 'net profit' in c.lower() or 'profit' in c.lower()), None)
+    seed_col    = next((c for c in df_agr.columns if 'seed' in c.lower()), None)
+    fert_col    = next((c for c in df_agr.columns if 'fertilizer' in c.lower()), None)
+    labour_col  = next((c for c in df_agr.columns if 'labour' in c.lower()), None)
+    irrig_col   = next((c for c in df_agr.columns if 'irrigation' in c.lower()), None)
+    market_col  = next((c for c in df_agr.columns if 'market' in c.lower() and 'price' not in c.lower()), None)
+    rain_col    = next((c for c in df_agr.columns if 'rainfall' in c.lower()), None)
+
+    if date_col: df_agr[date_col] = pd.to_datetime(df_agr[date_col], dayfirst=True, errors='coerce')
+    if exp_yield_col and act_yield_col:
+        df_agr['Yield Efficiency %'] = (df_agr[act_yield_col]/df_agr[exp_yield_col]*100).round(1)
+
+    total_rev    = df_agr[rev_col].sum() if rev_col else 0
+    total_cost   = df_agr[cost_col].sum() if cost_col else 0
+    total_profit = df_agr[profit_col].sum() if profit_col else total_rev - total_cost
+    profit_margin= round(total_profit/total_rev*100,1) if total_rev > 0 else 0
+    yield_eff    = df_agr['Yield Efficiency %'].mean() if 'Yield Efficiency %' in df_agr.columns else 0
+    total_area   = df_agr[area_col].sum() if area_col else 0
+    num_crops    = df_agr[crop_col].nunique() if crop_col else 0
+
+    kpi_row([
+        (f"₹{total_rev:,.0f}", "Total Revenue", "indigo", None),
+        (f"₹{total_profit:,.0f}", "Net Profit", "green" if total_profit>=0 else "red", f"{profit_margin:.1f}% margin"),
+        (f"{yield_eff:.1f}%", "Yield Efficiency", "green" if yield_eff>=90 else "amber" if yield_eff>=75 else "red", "Actual vs Expected"),
+        (f"{total_area:.1f}", "Total Acres", "indigo", "Under cultivation"),
+        (f"{num_crops}", "Crop Types", "indigo", None),
+        (f"₹{total_cost/total_area:.0f}" if total_area > 0 else "N/A", "Cost per Acre", "indigo", "Input efficiency"),
+    ])
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🌾 Crop Performance", "💰 Profit Analysis", "🌍 State & Market",
+        "🧪 Input Cost Analysis", "🚨 Smart Alerts"
+    ])
+
+    with tab1:
+        sh("🌾","Crop Yield Analysis")
+        if crop_col and act_yield_col:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                crop_yield = df_agr.groupby(crop_col)[act_yield_col].sum().sort_values(ascending=False)
+                fig, ax = plt.subplots(figsize=(6,5))
+                clean_chart(fig, ax)
+                crop_yield.plot(kind='barh', ax=ax, color='#10b981')
+                ax.invert_yaxis()
+                ax.set_title("Total Yield by Crop (Quintals)", fontweight='bold')
+                for i,val in enumerate(crop_yield.values):
+                    ax.text(val,i,f'  {val:.0f}Q',va='center',fontsize=9)
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                if 'Yield Efficiency %' in df_agr.columns:
+                    crop_eff = df_agr.groupby(crop_col)['Yield Efficiency %'].mean().sort_values()
+                    fig, ax = plt.subplots(figsize=(6,5))
+                    clean_chart(fig, ax)
+                    bar_c = ['#ef4444' if v<75 else '#f59e0b' if v<90 else '#10b981' for v in crop_eff.values]
+                    ax.barh(crop_eff.index, crop_eff.values, color=bar_c)
+                    ax.axvline(90, color='#6366f1', linestyle='--', linewidth=1.5, label='Target 90%')
+                    ax.set_title("Yield Efficiency by Crop", fontweight='bold')
+                    ax.legend(fontsize=9)
+                    for i,val in enumerate(crop_eff.values):
+                        ax.text(val+0.2,i,f'{val:.0f}%',va='center',fontsize=9)
+                    plt.tight_layout(); st.pyplot(fig); plt.close()
+
+        if season_col and act_yield_col:
+            sh("📅","Yield by Season")
+            season_yield = df_agr.groupby(season_col)[act_yield_col].sum().sort_values(ascending=False)
+            fig, ax = plt.subplots(figsize=(6,3))
+            clean_chart(fig, ax)
+            ax.bar(season_yield.index, season_yield.values, color=['#f59e0b','#6366f1','#10b981'][:len(season_yield)], width=0.4)
+            ax.set_title("Total Yield by Season", fontweight='bold')
+            for i,(idx,val) in enumerate(season_yield.items()):
+                ax.text(i, val, f'{val:.0f}Q', ha='center', va='bottom', fontweight='bold')
+            plt.tight_layout(); st.pyplot(fig); plt.close()
+
+    with tab2:
+        sh("💰","Profitability by Crop")
+        if crop_col and profit_col:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                crop_profit = df_agr.groupby(crop_col)[profit_col].sum().sort_values(ascending=False)
+                fig, ax = plt.subplots(figsize=(6,5))
+                clean_chart(fig, ax)
+                bar_c = ['#10b981' if v>=0 else '#ef4444' for v in crop_profit.values]
+                crop_profit.plot(kind='barh', ax=ax, color=bar_c)
+                ax.invert_yaxis()
+                ax.axvline(0, color='#6b7280', linestyle='-', linewidth=1)
+                ax.set_title("Net Profit by Crop", fontweight='bold')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                crop_summary = df_agr.groupby(crop_col).agg({
+                    rev_col:'sum', cost_col:'sum', profit_col:'sum'
+                }).reset_index() if rev_col and cost_col and profit_col else df_agr.groupby(crop_col)[profit_col].sum().reset_index()
+                if rev_col and cost_col and profit_col:
+                    crop_summary.columns = ['Crop','Revenue','Total Cost','Net Profit']
+                    crop_summary['Margin %'] = (crop_summary['Net Profit']/crop_summary['Revenue']*100).round(1)
+                    crop_summary = crop_summary.sort_values('Net Profit', ascending=False)
+                    st.dataframe(crop_summary.style.background_gradient(subset=['Margin %'], cmap='RdYlGn'), use_container_width=True, hide_index=True)
+
+        if price_col and msp_col and crop_col:
+            sh("📊","Market Price vs MSP")
+            price_comp = df_agr.groupby(crop_col).agg({price_col:'mean', msp_col:'mean'}).reset_index()
+            price_comp.columns = ['Crop','Market Price','MSP']
+            price_comp['Above MSP'] = price_comp['Market Price'] >= price_comp['MSP']
+            fig, ax = plt.subplots(figsize=(10,4))
+            clean_chart(fig, ax)
+            x = range(len(price_comp))
+            ax.bar([i-0.2 for i in x], price_comp['MSP'], 0.35, label='MSP', color='#e0e7ff', edgecolor='white')
+            ax.bar([i+0.2 for i in x], price_comp['Market Price'], 0.35, label='Market Price',
+                   color=['#10b981' if v else '#ef4444' for v in price_comp['Above MSP']], edgecolor='white')
+            ax.set_xticks(list(x)); ax.set_xticklabels(price_comp['Crop'], rotation=30, ha='right')
+            ax.legend(); ax.set_title("Market Price vs MSP by Crop", fontweight='bold')
+            plt.tight_layout(); st.pyplot(fig); plt.close()
+            below_msp = price_comp[~price_comp['Above MSP']]
+            if len(below_msp) > 0:
+                abox(f"⚠️ <b>{len(below_msp)} crops</b> are selling below MSP — consider waiting or exploring better markets.", "amber")
+
+    with tab3:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if state_col and rev_col:
+                sh("🌍","Revenue by State")
+                state_rev = df_agr.groupby(state_col)[rev_col].sum().sort_values(ascending=False)
+                fig, ax = plt.subplots(figsize=(6,4))
+                clean_chart(fig, ax)
+                ax.barh(state_rev.index, state_rev.values, color='#6366f1')
+                ax.invert_yaxis()
+                ax.set_title("Revenue by State", fontweight='bold')
+                for i,val in enumerate(state_rev.values):
+                    ax.text(val,i,f'  ₹{val:,.0f}',va='center',fontsize=9)
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+        with col_b:
+            if market_col and rev_col:
+                sh("🏪","Best Markets")
+                mkt_rev = df_agr.groupby(market_col)[rev_col].sum().sort_values(ascending=False)
+                fig, ax = plt.subplots(figsize=(6,4))
+                clean_chart(fig, ax)
+                ax.pie(mkt_rev.values, labels=mkt_rev.index, autopct='%1.1f%%',
+                       colors=['#6366f1','#818cf8','#a5b4fc','#c7d2fe','#10b981'],
+                       wedgeprops=dict(edgecolor='white',linewidth=2))
+                ax.set_title("Revenue by Market Type", fontweight='bold')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+
+    with tab4:
+        sh("🧪","Input Cost Breakdown")
+        cost_items = {}
+        if seed_col: cost_items['Seeds'] = df_agr[seed_col].sum()
+        if fert_col: cost_items['Fertilizer'] = df_agr[fert_col].sum()
+        if labour_col: cost_items['Labour'] = df_agr[labour_col].sum()
+        if irrig_col: cost_items['Irrigation'] = df_agr[irrig_col].sum()
+        if cost_items:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                fig, ax = plt.subplots(figsize=(5,5))
+                clean_chart(fig, ax)
+                ax.pie(list(cost_items.values()), labels=list(cost_items.keys()), autopct='%1.1f%%',
+                       colors=['#6366f1','#10b981','#f59e0b','#818cf8'],
+                       wedgeprops=dict(edgecolor='white',linewidth=2))
+                ax.set_title("Input Cost Breakdown", fontweight='bold')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                for k,v in sorted(cost_items.items(), key=lambda x:-x[1]):
+                    pct = v/sum(cost_items.values())*100
+                    st.markdown(f"<div style='display:flex;justify-content:space-between;background:white;border-radius:10px;padding:12px 16px;margin:5px 0;border-left:4px solid #6366f1;box-shadow:0 1px 4px rgba(0,0,0,0.05);'><span style='font-weight:600'>{k}</span><span style='font-weight:800;color:#6366f1'>₹{v:,.0f} <span style='font-size:0.75rem;color:#6b7280'>({pct:.1f}%)</span></span></div>", unsafe_allow_html=True)
+
+    with tab5:
+        agr_alerts = []
+        if yield_eff < 75: agr_alerts.append(('red', f"🔴 Yield efficiency <b>{yield_eff:.1f}%</b> is critically low — review soil quality, seeds, and irrigation."))
+        elif yield_eff < 90: agr_alerts.append(('amber', f"⚠️ Yield efficiency <b>{yield_eff:.1f}%</b> below 90% target."))
+        if total_profit < 0: agr_alerts.append(('red', f"🔴 Farming is running at a <b>loss of ₹{abs(total_profit):,.0f}</b> — review input costs and crop selection."))
+        if profit_margin < 15: agr_alerts.append(('amber', f"⚠️ Profit margin only <b>{profit_margin:.1f}%</b> — diversify crops or reduce input costs."))
+        if price_col and msp_col:
+            below = (df_agr[price_col] < df_agr[msp_col]).sum()
+            if below > 0: agr_alerts.append(('amber', f"⚠️ <b>{below} records</b> show selling below MSP — explore better market channels."))
+        if not agr_alerts: abox("✅ Farm operations look healthy — no critical alerts.", "green")
+        else:
+            for k,m in agr_alerts: abox(m, k)
+    st.stop()
+
+# ════════════════════════════════════════════════════════════════════════════
+# MODULE: CONSTRUCTION & PROJECTS INTELLIGENCE
+# ════════════════════════════════════════════════════════════════════════════
+if module == "Construction":
+    df_con = df.copy()
+    show_clean_report(fixes, df_con, df_raw)
+
+    date_col    = next((c for c in df_con.columns if 'date' in c.lower()), None)
+    proj_col    = next((c for c in df_con.columns if 'project' in c.lower()), None)
+    phase_col   = next((c for c in df_con.columns if 'phase' in c.lower()), None)
+    cont_col    = next((c for c in df_con.columns if 'contractor' in c.lower()), None)
+    budget_col  = next((c for c in df_con.columns if 'budget' in c.lower()), None)
+    actual_col  = next((c for c in df_con.columns if 'actual cost' in c.lower()), None)
+    plan_pct    = next((c for c in df_con.columns if 'planned progress' in c.lower()), None)
+    act_pct     = next((c for c in df_con.columns if 'actual progress' in c.lower()), None)
+    delay_col   = next((c for c in df_con.columns if 'delay' in c.lower()), None)
+    incident_col= next((c for c in df_con.columns if 'incident' in c.lower() or 'safety' in c.lower()), None)
+    quality_col = next((c for c in df_con.columns if 'quality' in c.lower()), None)
+    workers_col = next((c for c in df_con.columns if 'worker' in c.lower()), None)
+
+    if date_col: df_con[date_col] = pd.to_datetime(df_con[date_col], dayfirst=True, errors='coerce')
+    if budget_col and actual_col:
+        df_con['Cost Variance'] = df_con[actual_col] - df_con[budget_col]
+        df_con['Over Budget'] = df_con['Cost Variance'] > 0
+    if plan_pct and act_pct:
+        df_con['Progress Gap'] = df_con[plan_pct] - df_con[act_pct]
+
+    total_budget  = df_con[budget_col].sum() if budget_col else 0
+    total_actual  = df_con[actual_col].sum() if actual_col else 0
+    cost_overrun  = total_actual - total_budget
+    over_pct      = cost_overrun/total_budget*100 if total_budget > 0 else 0
+    avg_progress  = df_con[act_pct].mean() if act_pct else 0
+    total_delay   = df_con[delay_col].sum() if delay_col else 0
+    total_incidents = df_con[incident_col].sum() if incident_col else 0
+    avg_quality   = df_con[quality_col].mean() if quality_col else 0
+    num_projects  = df_con[proj_col].nunique() if proj_col else 0
+
+    kpi_row([
+        (f"{num_projects}", "Active Projects", "indigo", None),
+        (f"₹{total_budget:,.0f}", "Total Budget", "indigo", None),
+        (f"₹{abs(cost_overrun):,.0f}", "Cost Overrun", "red" if cost_overrun>0 else "green", f"{'Over' if cost_overrun>0 else 'Under'} budget {abs(over_pct):.1f}%"),
+        (f"{avg_progress:.1f}%", "Avg Progress", "green" if avg_progress>=80 else "amber" if avg_progress>=50 else "red", "Actual completion"),
+        (f"{total_delay:.0f} days", "Total Delays", "red" if total_delay>100 else "amber" if total_delay>30 else "green", "Across all projects"),
+        (f"{total_incidents:.0f}", "Safety Incidents", "red" if total_incidents>10 else "amber" if total_incidents>5 else "green", "Target: 0"),
+    ])
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Project Overview","💰 Budget vs Actual","⏱️ Progress & Delays","🏗️ Contractor Analysis","🚨 Smart Alerts"
+    ])
+
+    with tab1:
+        if proj_col and act_pct:
+            sh("📊","Project Progress Status")
+            proj_progress = df_con.groupby(proj_col)[act_pct].mean().sort_values(ascending=False)
+            fig, ax = plt.subplots(figsize=(10,5))
+            clean_chart(fig, ax)
+            bar_c = ['#10b981' if v>=80 else '#f59e0b' if v>=50 else '#ef4444' for v in proj_progress.values]
+            ax.barh(proj_progress.index, proj_progress.values, color=bar_c, height=0.5)
+            ax.axvline(80, color='#6366f1', linestyle='--', linewidth=1.5, label='Target 80%')
+            ax.set_title("Actual Progress % by Project", fontweight='bold')
+            ax.set_xlabel("Progress %")
+            ax.legend(fontsize=9)
+            for i,val in enumerate(proj_progress.values):
+                ax.text(val+0.3, i, f'{val:.0f}%', va='center', fontsize=9)
+            plt.tight_layout(); st.pyplot(fig); plt.close()
+
+        if phase_col:
+            sh("🔄","Work by Phase")
+            phase_count = df_con[phase_col].value_counts()
+            fig, ax = plt.subplots(figsize=(8,3))
+            clean_chart(fig, ax)
+            ax.bar(phase_count.index, phase_count.values, color='#818cf8', width=0.5)
+            ax.set_title("Activity Count by Phase", fontweight='bold')
+            for i,(idx,val) in enumerate(phase_count.items()):
+                ax.text(i, val+0.2, str(val), ha='center', fontweight='bold')
+            plt.tight_layout(); st.pyplot(fig); plt.close()
+
+    with tab2:
+        sh("💰","Budget vs Actual Cost")
+        if proj_col and budget_col and actual_col:
+            proj_cost = df_con.groupby(proj_col).agg({budget_col:'sum', actual_col:'sum'}).reset_index()
+            proj_cost.columns = ['Project','Budget','Actual']
+            proj_cost['Variance'] = proj_cost['Actual'] - proj_cost['Budget']
+            proj_cost['Over Budget'] = proj_cost['Variance'] > 0
+            fig, ax = plt.subplots(figsize=(10,5))
+            clean_chart(fig, ax)
+            x = range(len(proj_cost))
+            ax.bar([i-0.2 for i in x], proj_cost['Budget']/1000, 0.35, label='Budget (₹K)', color='#e0e7ff', edgecolor='white')
+            ax.bar([i+0.2 for i in x], proj_cost['Actual']/1000, 0.35, label='Actual (₹K)',
+                   color=['#ef4444' if v else '#10b981' for v in proj_cost['Over Budget']], edgecolor='white')
+            ax.set_xticks(list(x)); ax.set_xticklabels(proj_cost['Project'], rotation=30, ha='right', fontsize=8)
+            ax.legend(); ax.set_title("Budget vs Actual by Project", fontweight='bold')
+            ax.set_ylabel("Amount (₹ Thousands)")
+            plt.tight_layout(); st.pyplot(fig); plt.close()
+
+            over_projects = proj_cost[proj_cost['Over Budget']]
+            if len(over_projects) > 0:
+                abox(f"⚠️ <b>{len(over_projects)} projects</b> are over budget — total overrun ₹{over_projects['Variance'].sum():,.0f}", "amber")
+                st.dataframe(over_projects[['Project','Budget','Actual','Variance']].reset_index(drop=True), use_container_width=True, hide_index=True)
+
+    with tab3:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if proj_col and delay_col:
+                sh("⏱️","Delays by Project")
+                proj_delay = df_con.groupby(proj_col)[delay_col].sum().sort_values(ascending=False).head(8)
+                fig, ax = plt.subplots(figsize=(6,4))
+                clean_chart(fig, ax)
+                ax.barh(proj_delay.index, proj_delay.values, color='#ef4444', alpha=0.85)
+                ax.invert_yaxis()
+                ax.set_title("Total Delay Days by Project", fontweight='bold')
+                for i,val in enumerate(proj_delay.values):
+                    ax.text(val+0.2, i, f'{val:.0f}d', va='center', fontsize=9)
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+        with col_b:
+            if plan_pct and act_pct and proj_col:
+                sh("📉","Progress Gap Analysis")
+                gap_data = df_con.groupby(proj_col).agg({plan_pct:'mean', act_pct:'mean'}).reset_index()
+                gap_data.columns = ['Project','Planned %','Actual %']
+                gap_data['Gap'] = gap_data['Planned %'] - gap_data['Actual %']
+                behind = gap_data[gap_data['Gap'] > 10]
+                if len(behind) > 0:
+                    abox(f"⚠️ <b>{len(behind)} projects</b> are significantly behind schedule.", "amber")
+                    st.dataframe(behind.sort_values('Gap', ascending=False).reset_index(drop=True), use_container_width=True, hide_index=True)
+                else:
+                    abox("✅ All projects are on or near schedule.", "green")
+
+        if incident_col and proj_col:
+            sh("⚠️","Safety Incidents")
+            inc_by_proj = df_con.groupby(proj_col)[incident_col].sum().sort_values(ascending=False)
+            if inc_by_proj.sum() > 0:
+                fig, ax = plt.subplots(figsize=(10,3))
+                clean_chart(fig, ax)
+                bar_c = ['#ef4444' if v>3 else '#f59e0b' if v>0 else '#10b981' for v in inc_by_proj.values]
+                ax.bar(inc_by_proj.index, inc_by_proj.values, color=bar_c, width=0.5)
+                ax.set_title("Safety Incidents by Project", fontweight='bold')
+                plt.xticks(rotation=30, ha='right', fontsize=9)
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+            else:
+                abox("✅ Zero safety incidents recorded — excellent safety record.", "green")
+
+    with tab4:
+        if cont_col and actual_col:
+            sh("🏗️","Contractor Performance")
+            cont_stats = df_con.groupby(cont_col).agg({
+                actual_col:'sum', budget_col:'sum'
+            }).reset_index() if budget_col else df_con.groupby(cont_col)[actual_col].sum().reset_index()
+            if budget_col:
+                cont_stats.columns = ['Contractor','Actual Cost','Budget']
+                cont_stats['Cost Efficiency %'] = (cont_stats['Budget']/cont_stats['Actual Cost']*100).round(1)
+            if quality_col:
+                cont_quality = df_con.groupby(cont_col)[quality_col].mean().reset_index()
+                cont_quality.columns = ['Contractor','Avg Quality Score']
+                cont_stats = cont_stats.merge(cont_quality, on='Contractor')
+            if delay_col:
+                cont_delay = df_con.groupby(cont_col)[delay_col].sum().reset_index()
+                cont_delay.columns = ['Contractor','Total Delays']
+                cont_stats = cont_stats.merge(cont_delay, on='Contractor')
+            cont_stats = cont_stats.sort_values('Actual Cost', ascending=False).reset_index(drop=True)
+            st.dataframe(cont_stats, use_container_width=True, hide_index=True)
+
+    with tab5:
+        con_alerts = []
+        if cost_overrun > total_budget*0.1: con_alerts.append(('red', f"🔴 Total cost overrun is <b>₹{cost_overrun:,.0f} ({over_pct:.1f}%)</b> — review project spending urgently."))
+        elif cost_overrun > 0: con_alerts.append(('amber', f"⚠️ Projects are <b>₹{cost_overrun:,.0f}</b> over budget — monitor closely."))
+        if total_delay > 100: con_alerts.append(('red', f"🔴 <b>{total_delay:.0f} days</b> of delays across projects — review timeline management."))
+        if total_incidents > 5: con_alerts.append(('red', f"🔴 <b>{total_incidents:.0f} safety incidents</b> recorded — immediate safety review required."))
+        if avg_quality < 75 and avg_quality > 0: con_alerts.append(('amber', f"⚠️ Average quality score <b>{avg_quality:.1f}</b> is below 75 — review contractor standards."))
+        if not con_alerts: abox("✅ Construction projects look on track — no critical alerts.", "green")
+        else:
+            for k,m in con_alerts: abox(m, k)
+    st.stop()
+
+# ════════════════════════════════════════════════════════════════════════════
+# MODULE: BANKING & MICROFINANCE INTELLIGENCE
+# ════════════════════════════════════════════════════════════════════════════
+if module == "Banking":
+    df_bnk = df.copy()
+    show_clean_report(fixes, df_bnk, df_raw)
+
+    date_col   = next((c for c in df_bnk.columns if 'date' in c.lower()), None)
+    type_col   = next((c for c in df_bnk.columns if 'loan type' in c.lower()), None)
+    branch_col = next((c for c in df_bnk.columns if 'branch' in c.lower()), None)
+    agent_col  = next((c for c in df_bnk.columns if 'agent' in c.lower()), None)
+    amt_col    = next((c for c in df_bnk.columns if 'loan amount' in c.lower()), None)
+    rate_col   = next((c for c in df_bnk.columns if 'interest rate' in c.lower()), None)
+    emi_col    = next((c for c in df_bnk.columns if 'emi' in c.lower()), None)
+    paid_col   = next((c for c in df_bnk.columns if 'emis paid' in c.lower()), None)
+    out_col    = next((c for c in df_bnk.columns if 'outstanding' in c.lower()), None)
+    status_col = next((c for c in df_bnk.columns if 'status' in c.lower()), None)
+    overdue_col= next((c for c in df_bnk.columns if 'overdue' in c.lower()), None)
+    collect_col= next((c for c in df_bnk.columns if 'collection %' in c.lower()), None)
+    state_col  = next((c for c in df_bnk.columns if 'state' in c.lower()), None)
+
+    if date_col: df_bnk[date_col] = pd.to_datetime(df_bnk[date_col], dayfirst=True, errors='coerce')
+
+    total_disbursed = df_bnk[amt_col].sum() if amt_col else 0
+    total_outstanding= df_bnk[out_col].sum() if out_col else 0
+    npa_count = (df_bnk[status_col].str.upper()=='NPA').sum() if status_col else 0
+    npa_rate  = npa_count/len(df_bnk)*100
+    npa_value = df_bnk[df_bnk[status_col].str.upper()=='NPA'][out_col].sum() if status_col and out_col else 0
+    avg_collect = df_bnk[collect_col].mean() if collect_col else 0
+    avg_rate  = df_bnk[rate_col].mean() if rate_col else 0
+    active_loans = (df_bnk[status_col].str.title()=='Active').sum() if status_col else len(df_bnk)
+
+    kpi_row([
+        (f"₹{total_disbursed/1e6:.1f}M", "Total Disbursed", "indigo", f"{len(df_bnk):,} loans"),
+        (f"₹{total_outstanding/1e6:.1f}M", "Total Outstanding", "indigo", "Portfolio size"),
+        (f"{npa_rate:.1f}%", "NPA Rate", "red" if npa_rate>10 else "amber" if npa_rate>5 else "green", "Target: <5%"),
+        (f"₹{npa_value/1e6:.1f}M", "NPA Value", "red" if npa_value>0 else "green", "At risk"),
+        (f"{avg_collect:.1f}%", "Avg Collection %", "green" if avg_collect>=85 else "amber" if avg_collect>=70 else "red", "Recovery rate"),
+        (f"{active_loans:,}", "Active Loans", "indigo", None),
+    ])
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Portfolio Overview","⚠️ NPA Analysis","🏦 Branch Performance","👤 Agent Performance","🚨 Smart Alerts"
+    ])
+
+    with tab1:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if type_col and amt_col:
+                sh("📊","Loan Portfolio by Type")
+                type_amt = df_bnk.groupby(type_col)[amt_col].sum().sort_values(ascending=False)
+                fig, ax = plt.subplots(figsize=(6,5))
+                clean_chart(fig, ax)
+                ax.pie(type_amt.values, labels=type_amt.index, autopct='%1.1f%%',
+                       colors=['#6366f1','#818cf8','#a5b4fc','#c7d2fe','#e0e7ff','#4f46e5','#10b981','#34d399'],
+                       wedgeprops=dict(edgecolor='white',linewidth=2))
+                ax.set_title("Portfolio by Loan Type", fontweight='bold')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+        with col_b:
+            if status_col:
+                sh("📋","Loan Status Breakdown")
+                status_count = df_bnk[status_col].value_counts()
+                fig, ax = plt.subplots(figsize=(6,5))
+                clean_chart(fig, ax)
+                status_colors = {'Active':'#10b981','Closed':'#6366f1','NPA':'#ef4444','Written Off':'#9ca3af','Restructured':'#f59e0b'}
+                bar_c = [status_colors.get(s,'#6366f1') for s in status_count.index]
+                ax.pie(status_count.values, labels=status_count.index, autopct='%1.1f%%',
+                       colors=bar_c, wedgeprops=dict(edgecolor='white',linewidth=2))
+                ax.set_title("Portfolio Status Split", fontweight='bold')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+
+        if type_col and amt_col and out_col:
+            sh("💰","Outstanding by Loan Type")
+            type_out = df_bnk.groupby(type_col).agg({amt_col:'sum', out_col:'sum'}).reset_index()
+            type_out.columns = ['Loan Type','Disbursed','Outstanding']
+            type_out['Collection %'] = ((type_out['Disbursed']-type_out['Outstanding'])/type_out['Disbursed']*100).round(1)
+            type_out = type_out.sort_values('Outstanding', ascending=False)
+            st.dataframe(type_out.style.background_gradient(subset=['Collection %'], cmap='RdYlGn'), use_container_width=True, hide_index=True)
+
+    with tab2:
+        sh("⚠️","NPA Analysis")
+        if status_col and out_col:
+            npa_df = df_bnk[df_bnk[status_col].str.upper()=='NPA'].copy()
+            kpi_row([
+                (f"{len(npa_df)}", "NPA Accounts", "red", None),
+                (f"₹{npa_value:,.0f}", "NPA Outstanding", "red", "At risk"),
+                (f"{npa_rate:.1f}%", "NPA Rate", "red" if npa_rate>10 else "amber", "of portfolio"),
+            ])
+            if len(npa_df) > 0:
+                abox(f"🔴 <b>{len(npa_df)} accounts</b> are NPA with ₹{npa_value:,.0f} outstanding — initiate recovery process immediately.", "red")
+                if type_col:
+                    npa_by_type = npa_df.groupby(type_col)[out_col].sum().sort_values(ascending=False)
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        fig, ax = plt.subplots(figsize=(6,4))
+                        clean_chart(fig, ax)
+                        ax.barh(npa_by_type.index, npa_by_type.values, color='#ef4444', alpha=0.85)
+                        ax.invert_yaxis()
+                        ax.set_title("NPA Outstanding by Loan Type", fontweight='bold')
+                        for i,val in enumerate(npa_by_type.values):
+                            ax.text(val,i,f'  ₹{val:,.0f}',va='center',fontsize=9)
+                        plt.tight_layout(); st.pyplot(fig); plt.close()
+                    with col_b:
+                        if overdue_col:
+                            show_cols = [c for c in [type_col, branch_col, amt_col, out_col, overdue_col] if c and c in npa_df.columns]
+                            st.dataframe(npa_df[show_cols].sort_values(out_col, ascending=False).reset_index(drop=True), use_container_width=True, hide_index=True)
+
+    with tab3:
+        if branch_col and amt_col:
+            sh("🏦","Branch Performance")
+            branch_stats = df_bnk.groupby(branch_col).agg({amt_col:'sum', out_col:'sum'}).reset_index() if out_col else df_bnk.groupby(branch_col)[amt_col].sum().reset_index()
+            if out_col:
+                branch_stats.columns = ['Branch','Disbursed','Outstanding']
+                if status_col:
+                    branch_npa = df_bnk[df_bnk[status_col].str.upper()=='NPA'].groupby(branch_col).size().reset_index()
+                    branch_npa.columns = ['Branch','NPA Count']
+                    branch_stats = branch_stats.merge(branch_npa, on='Branch', how='left').fillna(0)
+                    branch_stats['NPA Count'] = branch_stats['NPA Count'].astype(int)
+                branch_stats['Collection %'] = ((branch_stats['Disbursed']-branch_stats['Outstanding'])/branch_stats['Disbursed']*100).round(1)
+            col_a, col_b = st.columns(2)
+            with col_a:
+                fig, ax = plt.subplots(figsize=(6,5))
+                clean_chart(fig, ax)
+                branch_disburse = branch_stats.sort_values('Disbursed', ascending=False)
+                ax.barh(branch_disburse['Branch'], branch_disburse['Disbursed'], color='#6366f1')
+                ax.invert_yaxis()
+                ax.set_title("Loans Disbursed by Branch", fontweight='bold')
+                for i,val in enumerate(branch_disburse['Disbursed']):
+                    ax.text(val,i,f'  ₹{val:,.0f}',va='center',fontsize=8)
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                st.dataframe(branch_stats.sort_values('Disbursed', ascending=False).reset_index(drop=True), use_container_width=True, hide_index=True)
+
+    with tab4:
+        if agent_col and amt_col:
+            sh("👤","Agent Performance")
+            agent_stats = df_bnk.groupby(agent_col).agg(Loans=(amt_col,'count'), Disbursed=(amt_col,'sum')).reset_index()
+            if status_col:
+                agent_npa = df_bnk[df_bnk[status_col].str.upper()=='NPA'].groupby(agent_col).size().reset_index()
+                agent_npa.columns = [agent_col,'NPA Count']
+                agent_stats = agent_stats.merge(agent_npa, on=agent_col, how='left').fillna(0)
+                agent_stats['NPA Count'] = agent_stats['NPA Count'].astype(int)
+                agent_stats['NPA Rate %'] = (agent_stats['NPA Count']/agent_stats['Loans']*100).round(1)
+            agent_stats = agent_stats.sort_values('Disbursed', ascending=False).reset_index(drop=True)
+            col_a, col_b = st.columns(2)
+            with col_a:
+                fig, ax = plt.subplots(figsize=(6,5))
+                clean_chart(fig, ax)
+                ax.barh(agent_stats[agent_col].head(10), agent_stats['Disbursed'].head(10), color='#818cf8')
+                ax.invert_yaxis()
+                ax.set_title("Top 10 Agents by Disbursement", fontweight='bold')
+                plt.tight_layout(); st.pyplot(fig); plt.close()
+            with col_b:
+                st.dataframe(agent_stats.style.background_gradient(subset=['NPA Rate %'] if 'NPA Rate %' in agent_stats.columns else ['Loans'], cmap='RdYlGn_r'), use_container_width=True, hide_index=True)
+
+    with tab5:
+        bnk_alerts = []
+        if npa_rate > 10: bnk_alerts.append(('red', f"🔴 NPA rate <b>{npa_rate:.1f}%</b> is critically high — immediate recovery action required."))
+        elif npa_rate > 5: bnk_alerts.append(('amber', f"⚠️ NPA rate <b>{npa_rate:.1f}%</b> exceeds 5% threshold — strengthen credit assessment."))
+        if avg_collect < 70: bnk_alerts.append(('red', f"🔴 Collection efficiency only <b>{avg_collect:.1f}%</b> — recovery processes need urgent attention."))
+        elif avg_collect < 85: bnk_alerts.append(('amber', f"⚠️ Collection rate <b>{avg_collect:.1f}%</b> below 85% target."))
+        if npa_value > total_disbursed*0.1: bnk_alerts.append(('red', f"🔴 NPA value <b>₹{npa_value:,.0f}</b> exceeds 10% of portfolio — systemic risk."))
+        if not bnk_alerts: abox("✅ Loan portfolio looks healthy — no critical alerts.", "green")
+        else:
+            for k,m in bnk_alerts: abox(m, k)
     st.stop()
 
 # ── Sales module uses the already smart-cleaned df ───────────────────────────

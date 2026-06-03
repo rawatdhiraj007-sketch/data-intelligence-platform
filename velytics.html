@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Velytics — Your data scientist. No hiring required.</title>
+  <meta name="description" content="Upload any Excel or CSV file. Get instant analytics, forecasts, and smart alerts. No data scientist needed. Used by 500+ businesses across 20 industries."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --black: #0a0a0a; --white: #fff;
+      --g50: #f9fafb; --g100: #f3f4f6; --g200: #e5e7eb; --g300: #d1d5db;
+      --g400: #9ca3af; --g500: #6b7280; --g600: #4b5563; --g800: #1f2937;
+      --accent: #6366f1; --accent-l: #818cf8; --accent-d: #4f46e5;
+      --accent-bg: #eef2ff; --green: #10b981; --amber: #f59e0b; --red: #ef4444;
+    }
+    html { scroll-behavior: smooth; font-size: 16px; }
+    body { font-family: 'Inter', sans-serif; background: var(--white); color: var(--black); -webkit-font-smoothing: antialiased; }
+
+    /* NAV */
+    nav { position: sticky; top: 0; z-index: 100; background: rgba(255,255,255,0.92); backdrop-filter: blur(12px); border-bottom: 1px solid var(--g200); padding: 0 40px; height: 60px; display: flex; align-items: center; justify-content: space-between; }
+    .nav-logo { font-size: 1.25rem; font-weight: 900; letter-spacing: -0.5px; color: var(--black); text-decoration: none; }
+    .nav-logo span { color: var(--accent); }
+    .nav-links { display: flex; align-items: center; gap: 32px; }
+    .nav-links a { font-size: 0.875rem; font-weight: 500; color: var(--g500); text-decoration: none; transition: color 0.15s; }
+    .nav-links a:hover { color: var(--black); }
+    .nav-cta { background: var(--black); color: var(--white) !important; padding: 8px 18px; border-radius: 8px; font-weight: 600 !important; font-size: 0.875rem !important; transition: background 0.15s !important; }
+    .nav-cta:hover { background: #1f2937 !important; }
+
+    /* HERO */
+    .hero-section { background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.12), transparent); border-bottom: 1px solid var(--g200); }
+    .hero { max-width: 1100px; margin: 0 auto; padding: 100px 40px 80px; text-align: center; }
+    .hero-badge { display: inline-flex; align-items: center; gap: 8px; background: var(--accent-bg); color: var(--accent-d); font-size: 0.78rem; font-weight: 700; padding: 7px 16px; border-radius: 100px; margin-bottom: 32px; border: 1px solid #c7d2fe; }
+    .hero-badge-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .hero h1 { font-size: clamp(2.6rem, 5.5vw, 4.2rem); font-weight: 900; letter-spacing: -2.5px; line-height: 1.08; color: var(--black); margin-bottom: 24px; }
+    .hero h1 em { font-style: normal; background: linear-gradient(135deg, #6366f1, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .hero p { font-size: 1.15rem; color: var(--g500); line-height: 1.75; max-width: 580px; margin: 0 auto 44px; }
+    .hero-actions { display: flex; justify-content: center; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 48px; }
+    .btn-primary { background: var(--accent); color: white; padding: 15px 30px; border-radius: 12px; font-size: 0.95rem; font-weight: 700; text-decoration: none; transition: all 0.15s; box-shadow: 0 4px 20px rgba(99,102,241,0.4); display: inline-flex; align-items: center; gap: 8px; }
+    .btn-primary:hover { background: var(--accent-d); transform: translateY(-2px); box-shadow: 0 8px 28px rgba(99,102,241,0.5); }
+    .btn-secondary { background: white; color: var(--black); padding: 15px 30px; border-radius: 12px; font-size: 0.95rem; font-weight: 600; text-decoration: none; border: 1.5px solid var(--g200); transition: all 0.15s; }
+    .btn-secondary:hover { border-color: var(--accent-l); color: var(--accent); background: var(--accent-bg); }
+    .hero-trust { display: flex; justify-content: center; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--g400); flex-wrap: wrap; }
+    .hero-trust .stars { color: #fbbf24; letter-spacing: 1px; }
+
+    /* DASHBOARD PREVIEW */
+    .preview-wrap { max-width: 1100px; margin: 0 auto 80px; padding: 0 40px; }
+    .preview-inner { background: var(--black); border-radius: 20px; padding: 3px; box-shadow: 0 30px 80px rgba(0,0,0,0.18); overflow: hidden; }
+    .preview-bar { background: #1a1a1a; padding: 12px 20px; display: flex; align-items: center; gap: 8px; }
+    .dot { width: 11px; height: 11px; border-radius: 50%; }
+    .dot-r { background: #ff5f57; }
+    .dot-y { background: #ffbd2e; }
+    .dot-g { background: #28c840; }
+    .preview-url { margin-left: 12px; background: #2a2a2a; border-radius: 6px; padding: 4px 14px; font-size: 0.75rem; color: #6b7280; font-family: monospace; }
+    .preview-content { background: #f8fafc; padding: 28px; }
+    .preview-modules { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+    .pm { padding: 7px 16px; border-radius: 100px; font-size: 0.78rem; font-weight: 600; border: 1.5px solid #e5e7eb; background: white; color: #6b7280; }
+    .pm.active { background: var(--accent); color: white; border-color: var(--accent); box-shadow: 0 2px 8px rgba(99,102,241,0.3); }
+    .preview-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+    .pk { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+    .pk-t { width: 100%; height: 3px; border-radius: 2px; margin-bottom: 12px; }
+    .pk-num { font-size: 1.4rem; font-weight: 900; color: var(--black); letter-spacing: -0.5px; }
+    .pk-label { font-size: 0.68rem; color: var(--g400); font-weight: 600; text-transform: uppercase; margin-top: 4px; }
+    .pk-sub { font-size: 0.72rem; color: var(--green); font-weight: 600; margin-top: 6px; }
+    .pk-sub.red { color: var(--red); }
+    .preview-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .pc { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+    .pc-title { font-size: 0.8rem; font-weight: 700; color: var(--black); margin-bottom: 14px; }
+    .bar-chart { display: flex; align-items: flex-end; gap: 8px; height: 80px; }
+    .bar { border-radius: 4px 4px 0 0; flex: 1; transition: height 0.3s; }
+    .chart-line { position: relative; height: 80px; }
+    .chart-line svg { width: 100%; height: 100%; }
+    .tabs-row { display: flex; gap: 6px; margin-bottom: 16px; }
+    .tab-item { padding: 6px 12px; border-radius: 8px; font-size: 0.75rem; font-weight: 600; background: var(--g100); color: var(--g500); }
+    .tab-item.active { background: white; box-shadow: 0 1px 4px rgba(0,0,0,0.08); color: var(--black); }
+
+    /* SOCIAL PROOF BAR */
+    .proof-bar { background: var(--g50); border-top: 1px solid var(--g200); border-bottom: 1px solid var(--g200); padding: 20px 40px; }
+    .proof-inner { max-width: 1100px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+    .proof-stat { text-align: center; }
+    .proof-num { font-size: 1.6rem; font-weight: 900; color: var(--black); letter-spacing: -0.5px; }
+    .proof-label { font-size: 0.75rem; color: var(--g400); font-weight: 500; margin-top: 2px; }
+    .proof-divider { width: 1px; height: 40px; background: var(--g200); }
+
+    /* SECTION COMMON */
+    section { padding: 96px 40px; }
+    .section-inner { max-width: 1100px; margin: 0 auto; }
+    .section-tag { display: inline-block; background: var(--accent-bg); color: var(--accent-d); font-size: 0.75rem; font-weight: 700; padding: 4px 12px; border-radius: 100px; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .section-title { font-size: clamp(1.8rem, 3vw, 2.5rem); font-weight: 900; letter-spacing: -1px; color: var(--black); margin-bottom: 16px; line-height: 1.2; }
+    .section-sub { font-size: 1.05rem; color: var(--g500); line-height: 1.7; max-width: 560px; }
+
+    /* HOW IT WORKS */
+    .hiw { background: #0a0a0a; color: white; padding: 100px 40px; }
+    .hiw .section-title { color: white; }
+    .hiw .section-sub { color: #6b7280; }
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 64px; position: relative; }
+    .steps::before { content: ''; position: absolute; top: 52px; left: calc(16.66% + 20px); right: calc(16.66% + 20px); height: 2px; background: linear-gradient(90deg, #6366f1, #818cf8, #6366f1); opacity: 0.3; z-index: 0; }
+    .step { background: #111827; border: 1px solid #1f2937; border-radius: 20px; padding: 36px 28px; position: relative; transition: all 0.2s; }
+    .step:hover { border-color: #6366f1; transform: translateY(-4px); box-shadow: 0 20px 48px rgba(99,102,241,0.15); }
+    .step-badge { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; background: linear-gradient(135deg, #6366f1, #818cf8); font-size: 0.85rem; font-weight: 900; color: white; margin-bottom: 20px; box-shadow: 0 4px 16px rgba(99,102,241,0.4); }
+    .step-icon-wrap { width: 56px; height: 56px; border-radius: 16px; background: #1f2937; border: 1px solid #374151; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; margin-bottom: 20px; }
+    .step-title { font-size: 1.15rem; font-weight: 800; color: white; margin-bottom: 10px; letter-spacing: -0.3px; }
+    .step-desc { font-size: 0.85rem; color: #6b7280; line-height: 1.75; }
+    .step-arrow { display: none; }
+    .step-tag { display: inline-block; background: rgba(99,102,241,0.15); color: #818cf8; font-size: 0.7rem; font-weight: 700; padding: 3px 10px; border-radius: 100px; margin-top: 16px; border: 1px solid rgba(99,102,241,0.2); }
+
+    /* INDUSTRIES */
+    .industries-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 48px; }
+    .industry-card { background: var(--g50); border: 1.5px solid var(--g200); border-radius: 14px; padding: 20px 16px; text-align: center; transition: all 0.15s; cursor: default; }
+    .industry-card:hover { border-color: var(--accent); background: var(--accent-bg); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(99,102,241,0.12); }
+    .industry-card.live { border-color: #c7d2fe; background: var(--accent-bg); }
+    .ind-icon { font-size: 1.8rem; margin-bottom: 10px; }
+    .ind-name { font-size: 0.82rem; font-weight: 700; color: var(--black); }
+    .ind-badge { display: inline-block; background: var(--green); color: white; font-size: 0.6rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; margin-top: 6px; text-transform: uppercase; }
+    .ind-badge.soon { background: var(--g300); color: var(--g600); }
+
+    /* FEATURES */
+    .features { background: var(--g50); }
+    .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 56px; }
+    .feature-card { background: white; border-radius: 16px; padding: 28px; border: 1.5px solid var(--g200); transition: all 0.15s; }
+    .feature-card:hover { border-color: var(--accent); box-shadow: 0 4px 16px rgba(99,102,241,0.1); }
+    .feat-icon { font-size: 1.8rem; margin-bottom: 16px; }
+    .feat-title { font-size: 1rem; font-weight: 800; color: var(--black); margin-bottom: 8px; }
+    .feat-desc { font-size: 0.875rem; color: var(--g500); line-height: 1.7; }
+    .feat-list { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; }
+    .feat-item { font-size: 0.8rem; color: var(--g600); display: flex; align-items: center; gap: 6px; }
+    .feat-item::before { content: '✓'; color: var(--green); font-weight: 700; }
+
+    /* SMART CLEAN HIGHLIGHT */
+    .clean-section { background: white; }
+    .clean-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; margin-top: 60px; }
+    .clean-problems { display: flex; flex-direction: column; gap: 10px; }
+    .cp { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: 10px; }
+    .cp.before { background: #fef2f2; border-left: 3px solid var(--red); }
+    .cp.after { background: #f0fdf4; border-left: 3px solid var(--green); }
+    .cp-icon { font-size: 1rem; margin-top: 1px; }
+    .cp-text { font-size: 0.83rem; line-height: 1.5; }
+    .cp-text strong { display: block; font-weight: 700; margin-bottom: 2px; }
+    .cp.before .cp-text strong { color: #991b1b; }
+    .cp.after .cp-text strong { color: #166534; }
+    .cp.before .cp-text { color: #991b1b; }
+    .cp.after .cp-text { color: #166534; }
+
+    /* COMPARISON TABLE */
+    .comparison { background: var(--g50); }
+    .comp-table { width: 100%; border-collapse: collapse; margin-top: 48px; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+    .comp-table th { padding: 16px 20px; font-size: 0.85rem; font-weight: 800; text-align: center; background: var(--black); color: white; }
+    .comp-table th:first-child { text-align: left; background: var(--black); }
+    .comp-table th.hl { background: var(--accent); }
+    .comp-table td { padding: 14px 20px; font-size: 0.85rem; border-bottom: 1px solid var(--g100); text-align: center; color: var(--g600); }
+    .comp-table td:first-child { text-align: left; font-weight: 600; color: var(--black); }
+    .comp-table tr:last-child td { border-bottom: none; }
+    .comp-table tr:hover td { background: var(--g50); }
+    .yes { color: var(--green); font-size: 1.1rem; font-weight: 700; }
+    .no { color: var(--red); font-size: 1.1rem; }
+    .part { color: var(--amber); font-size: 0.8rem; font-weight: 600; }
+
+    /* TESTIMONIALS */
+    .testimonials { background: white; }
+    .testi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 48px; }
+    .testi-card { background: var(--g50); border: 1.5px solid var(--g200); border-radius: 16px; padding: 28px; transition: all 0.15s; }
+    .testi-card:hover { border-color: var(--accent-l); box-shadow: 0 4px 16px rgba(99,102,241,0.08); }
+    .testi-stars { color: #fbbf24; font-size: 0.9rem; margin-bottom: 14px; }
+    .testi-text { font-size: 0.9rem; color: var(--g600); line-height: 1.7; margin-bottom: 20px; font-style: italic; }
+    .testi-author { display: flex; align-items: center; gap: 12px; }
+    .testi-avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1rem; font-weight: 800; color: white; }
+    .testi-name { font-size: 0.85rem; font-weight: 700; color: var(--black); }
+    .testi-role { font-size: 0.75rem; color: var(--g400); margin-top: 2px; }
+
+    /* PRICING */
+    .pricing { background: var(--g50); }
+    .pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 48px; align-items: start; }
+    .price-card { background: white; border: 1.5px solid var(--g200); border-radius: 20px; padding: 32px; transition: all 0.15s; }
+    .price-card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.08); }
+    .price-card.popular { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(99,102,241,0.08); position: relative; }
+    .popular-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--accent); color: white; font-size: 0.72rem; font-weight: 700; padding: 4px 14px; border-radius: 100px; white-space: nowrap; }
+    .price-name { font-size: 0.85rem; font-weight: 700; color: var(--g500); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; }
+    .price-amount { display: flex; align-items: baseline; gap: 2px; margin-bottom: 6px; }
+    .price-curr { font-size: 1.2rem; font-weight: 700; color: var(--black); }
+    .price-num { font-size: 3rem; font-weight: 900; color: var(--black); letter-spacing: -2px; line-height: 1; }
+    .price-period { font-size: 0.85rem; color: var(--g400); font-weight: 500; }
+    .price-desc { font-size: 0.82rem; color: var(--g400); margin-bottom: 28px; padding-bottom: 24px; border-bottom: 1px solid var(--g100); }
+    .price-features { display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
+    .pf { font-size: 0.85rem; color: var(--g600); display: flex; align-items: flex-start; gap: 8px; line-height: 1.5; }
+    .pf::before { content: '✓'; color: var(--green); font-weight: 800; flex-shrink: 0; margin-top: 1px; }
+    .pf.no-feat { color: var(--g300); }
+    .pf.no-feat::before { content: '–'; color: var(--g300); }
+    .price-btn { display: block; text-align: center; padding: 12px; border-radius: 10px; font-size: 0.9rem; font-weight: 700; text-decoration: none; transition: all 0.15s; }
+    .price-btn-outline { border: 1.5px solid var(--g200); color: var(--black); }
+    .price-btn-outline:hover { border-color: var(--black); background: var(--g50); }
+    .price-btn-filled { background: var(--accent); color: white; box-shadow: 0 4px 12px rgba(99,102,241,0.3); }
+    .price-btn-filled:hover { background: var(--accent-d); transform: translateY(-1px); }
+    .price-btn-dark { background: var(--black); color: white; }
+    .price-btn-dark:hover { background: var(--g800); }
+
+    /* FAQ */
+    .faq { background: white; }
+    .faq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 48px; }
+    .faq-item { border: 1.5px solid var(--g200); border-radius: 12px; padding: 22px 24px; cursor: pointer; transition: all 0.15s; }
+    .faq-item:hover { border-color: var(--accent-l); }
+    .faq-q { font-size: 0.9rem; font-weight: 700; color: var(--black); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .faq-a { font-size: 0.85rem; color: var(--g500); line-height: 1.7; margin-top: 12px; display: none; }
+    .faq-item.open .faq-a { display: block; }
+    .faq-item.open { border-color: var(--accent); background: var(--accent-bg); }
+    .faq-item.open .faq-q { color: var(--accent-d); }
+    .faq-arrow { transition: transform 0.2s; font-size: 0.8rem; color: var(--g400); flex-shrink: 0; }
+    .faq-item.open .faq-arrow { transform: rotate(180deg); }
+
+    /* CTA SECTION */
+    .cta-section { background: var(--black); text-align: center; padding: 100px 40px; }
+    .cta-section h2 { font-size: clamp(2rem, 4vw, 3rem); font-weight: 900; color: white; letter-spacing: -1.5px; margin-bottom: 20px; line-height: 1.15; }
+    .cta-section h2 em { font-style: normal; color: var(--accent-l); }
+    .cta-section p { font-size: 1.05rem; color: #6b7280; margin-bottom: 40px; }
+    .cta-actions { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+    .cta-note { margin-top: 20px; font-size: 0.8rem; color: #4b5563; }
+
+    /* FOOTER */
+    footer { background: #0a0a0a; border-top: 1px solid #1a1a1a; padding: 40px; }
+    .footer-inner { max-width: 1100px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px; }
+    .footer-logo { font-size: 1.1rem; font-weight: 900; color: white; }
+    .footer-logo span { color: var(--accent-l); }
+    .footer-links { display: flex; gap: 24px; }
+    .footer-links a { font-size: 0.82rem; color: #4b5563; text-decoration: none; }
+    .footer-links a:hover { color: #9ca3af; }
+    .footer-copy { font-size: 0.78rem; color: #374151; }
+
+    /* RESPONSIVE */
+    @media (max-width: 768px) {
+      nav { padding: 0 20px; }
+      .nav-links { display: none; }
+      section { padding: 64px 20px; }
+      .hero { padding: 64px 20px 48px; }
+      .hero h1 { font-size: 2.2rem; }
+      .preview-wrap { padding: 0 20px; }
+      .preview-kpis { grid-template-columns: repeat(2, 1fr); }
+      .preview-charts { grid-template-columns: 1fr; }
+      .steps { grid-template-columns: 1fr; gap: 8px; }
+      .step:first-child, .step:last-child { border-radius: 0; }
+      .step-arrow { display: none; }
+      .industries-grid { grid-template-columns: repeat(2, 1fr); }
+      .features-grid { grid-template-columns: 1fr; }
+      .clean-grid { grid-template-columns: 1fr; gap: 32px; }
+      .testi-grid { grid-template-columns: 1fr; }
+      .pricing-grid { grid-template-columns: 1fr; }
+      .faq-grid { grid-template-columns: 1fr; }
+      .proof-divider { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="nav-logo">Vely<span>tics</span></a>
+  <div class="nav-links">
+    <a href="#how-it-works">How it works</a>
+    <a href="#industries">Industries</a>
+    <a href="#features">Features</a>
+    <a href="#pricing">Pricing</a>
+    <a href="#faq">FAQ</a>
+    <a href="https://velytics.streamlit.app" target="_blank" class="nav-cta">Try Free →</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="hero-section">
+<div class="hero">
+  <div class="hero-badge"><div class="hero-badge-dot"></div>Now live — 4 modules · 20 industries</div>
+  <h1>Your business data,<br/><em>analysed in 60 seconds.</em></h1>
+  <p>Upload any Excel or CSV. Get instant forecasts, smart alerts, and boardroom-ready insights — automatically. No data scientist, no SQL, no training needed.</p>
+  <div class="hero-actions">
+    <a href="https://velytics.streamlit.app" target="_blank" class="btn-primary">⚡ Try it free — no credit card</a>
+    <a href="#how-it-works" class="btn-secondary">See how it works →</a>
+  </div>
+  <div class="hero-trust">
+    <span class="stars">★★★★★</span>
+    <span>Trusted by 500+ businesses</span>
+    <span style="color:var(--g300)">·</span>
+    <span>20 industries</span>
+    <span style="color:var(--g300)">·</span>
+    <span>🔒 Data never stored</span>
+  </div>
+</div>
+</div>
+
+<!-- DASHBOARD PREVIEW -->
+<div class="preview-wrap">
+  <div class="preview-inner">
+    <div class="preview-bar">
+      <div class="dot dot-r"></div>
+      <div class="dot dot-y"></div>
+      <div class="dot dot-g"></div>
+      <div class="preview-url">velytics.app · Sales Intelligence</div>
+    </div>
+    <div class="preview-content">
+      <div class="preview-modules">
+        <div class="pm active">📈 Sales Intelligence</div>
+        <div class="pm">📦 Inventory</div>
+        <div class="pm">👥 HR & Payroll</div>
+        <div class="pm">💰 Finance</div>
+      </div>
+      <div class="tabs-row">
+        <div class="tab-item active">🌍 Revenue</div>
+        <div class="tab-item">📦 Products</div>
+        <div class="tab-item">👤 Salesperson</div>
+        <div class="tab-item">🔮 Forecast</div>
+        <div class="tab-item">🚨 Alerts</div>
+      </div>
+      <div class="preview-kpis">
+        <div class="pk"><div class="pk-t" style="background:#6366f1"></div><div class="pk-num">₹48.2L</div><div class="pk-label">Total Revenue</div><div class="pk-sub">↑ 12% vs last month</div></div>
+        <div class="pk"><div class="pk-t" style="background:#10b981"></div><div class="pk-num">94.6%</div><div class="pk-label">Target Achievement</div><div class="pk-sub">₹51L target</div></div>
+        <div class="pk"><div class="pk-t" style="background:#f59e0b"></div><div class="pk-num">2,847</div><div class="pk-label">Units Sold</div><div class="pk-sub">↑ 8% growth</div></div>
+        <div class="pk"><div class="pk-t" style="background:#ef4444"></div><div class="pk-num">3</div><div class="pk-label">Price Alerts</div><div class="pk-sub red">Inconsistent pricing</div></div>
+      </div>
+      <div class="preview-charts">
+        <div class="pc">
+          <div class="pc-title">Revenue by Region</div>
+          <div class="bar-chart">
+            <div class="bar" style="height:75%;background:#6366f1;opacity:0.9"></div>
+            <div class="bar" style="height:55%;background:#818cf8"></div>
+            <div class="bar" style="height:90%;background:#6366f1;opacity:0.9"></div>
+            <div class="bar" style="height:45%;background:#818cf8"></div>
+            <div class="bar" style="height:65%;background:#6366f1;opacity:0.7"></div>
+          </div>
+        </div>
+        <div class="pc">
+          <div class="pc-title">6-Month Forecast</div>
+          <div class="chart-line">
+            <svg viewBox="0 0 200 80" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#6366f1" stop-opacity="0.2"/>
+                  <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path d="M0,60 L30,50 L60,45 L90,35 L120,40 L150,30 L180,20" stroke="#6366f1" stroke-width="2.5" fill="none"/>
+              <path d="M120,40 L150,30 L180,20 L200,18" stroke="#f59e0b" stroke-width="2" stroke-dasharray="4,3" fill="none"/>
+              <path d="M0,60 L30,50 L60,45 L90,35 L120,40 L150,30 L180,20 L200,80 L0,80Z" fill="url(#g1)"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SOCIAL PROOF BAR -->
+<div class="proof-bar">
+  <div class="proof-inner">
+    <div class="proof-stat"><div class="proof-num">500+</div><div class="proof-label">Businesses using Velytics</div></div>
+    <div class="proof-divider"></div>
+    <div class="proof-stat"><div class="proof-num">20</div><div class="proof-label">Industries covered</div></div>
+    <div class="proof-divider"></div>
+    <div class="proof-stat"><div class="proof-num">150+</div><div class="proof-label">Analysis types</div></div>
+    <div class="proof-divider"></div>
+    <div class="proof-stat"><div class="proof-num">60s</div><div class="proof-label">Time to first insight</div></div>
+    <div class="proof-divider"></div>
+    <div class="proof-stat"><div class="proof-num">$0</div><div class="proof-label">Data scientist cost saved</div></div>
+  </div>
+</div>
+
+<!-- HOW IT WORKS -->
+<section class="hiw" id="how-it-works">
+  <div class="section-inner">
+    <div style="text-align:center; margin-bottom: 8px;">
+      <span class="section-tag" style="background:#1a1a1a; color:#818cf8; border:none;">How It Works</span>
+    </div>
+    <div style="text-align:center;">
+      <h2 class="section-title" style="text-align:center;">From messy file to<br/>boardroom insights in 3 steps</h2>
+      <p class="section-sub" style="margin: 0 auto; text-align:center;">No setup. No training. No technical skills needed.</p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-badge">01</div>
+        <div class="step-icon-wrap">📤</div>
+        <div class="step-title">Upload any file</div>
+        <div class="step-desc">Excel or CSV — messy, clean, multi-sheet, any format. Velytics accepts whatever you have, including files with title rows, merged cells, or inconsistent formatting.</div>
+        <div class="step-tag">Works with any Excel file</div>
+      </div>
+      <div class="step">
+        <div class="step-badge">02</div>
+        <div class="step-icon-wrap">🧹</div>
+        <div class="step-title">Auto-cleaned in 3 seconds</div>
+        <div class="step-desc">Our Smart Clean engine automatically fixes 23 types of data problems — removes garbage rows, converts text-numbers, standardises dates, detects real headers.</div>
+        <div class="step-tag">23 problems fixed automatically</div>
+      </div>
+      <div class="step">
+        <div class="step-badge">03</div>
+        <div class="step-icon-wrap">📊</div>
+        <div class="step-title">Instant insights & reports</div>
+        <div class="step-desc">Charts, forecasts, smart alerts, and PDF reports — all generated automatically. Filter by department, region, or product. Download and share in one click.</div>
+        <div class="step-tag">Results in under 60 seconds</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SMART CLEAN HIGHLIGHT -->
+<section class="clean-section" id="smart-clean">
+  <div class="section-inner">
+    <div class="clean-grid">
+      <div>
+        <span class="section-tag">Smart Clean Engine</span>
+        <h2 class="section-title">Works with your real, messy Excel files</h2>
+        <p class="section-sub">Every other analytics tool needs clean, perfect data. Your business doesn't have that. Velytics fixes the mess automatically — so you never have to.</p>
+        <div style="margin-top: 28px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display:flex;align-items:center;gap:10px;font-size:0.875rem;font-weight:600;color:#166534;"><span style="color:#10b981;font-size:1.1rem;">✓</span> 23 types of Excel problems auto-fixed</div>
+          <div style="display:flex;align-items:center;gap:10px;font-size:0.875rem;font-weight:600;color:#166534;"><span style="color:#10b981;font-size:1.1rem;">✓</span> Detailed fix report — see exactly what changed</div>
+          <div style="display:flex;align-items:center;gap:10px;font-size:0.875rem;font-weight:600;color:#166534;"><span style="color:#10b981;font-size:1.1rem;">✓</span> Works on multi-sheet Excel files</div>
+          <div style="display:flex;align-items:center;gap:10px;font-size:0.875rem;font-weight:600;color:#166534;"><span style="color:#10b981;font-size:1.1rem;">✓</span> Zero manual cleanup ever needed</div>
+        </div>
+      </div>
+      <div class="clean-problems">
+        <div class="cp before"><div class="cp-icon">❌</div><div class="cp-text"><strong>Before: Your typical Excel file</strong>3 title rows · merged headers · "1,000" stored as text · dates as "Mar-24" · blank rows · TOTAL row mixed in · duplicates</div></div>
+        <div style="text-align:center;padding:8px;font-size:1.5rem;color:#9ca3af;">↓</div>
+        <div style="text-align:center;background:#f0fdf4;border-radius:10px;padding:12px;border:1.5px solid #bbf7d0;font-size:0.82rem;font-weight:700;color:#166534;">⚡ Velytics Smart Clean — 3 seconds</div>
+        <div style="text-align:center;padding:8px;font-size:1.5rem;color:#9ca3af;">↓</div>
+        <div class="cp after"><div class="cp-icon">✅</div><div class="cp-text"><strong>After: Clean, analysis-ready data</strong>Real headers detected · Numbers converted · Dates standardised · Garbage removed · 9 issues fixed · Ready for analysis</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- INDUSTRIES -->
+<section style="background: var(--g50);" id="industries">
+  <div class="section-inner">
+    <div style="text-align:center;">
+      <span class="section-tag">20 Industries</span>
+      <h2 class="section-title">Built for every business, everywhere</h2>
+      <p class="section-sub" style="margin: 0 auto; text-align:center;">From retail shops in Mumbai to manufacturing plants in Manchester — if your business has data, Velytics has insights.</p>
+    </div>
+    <div class="industries-grid">
+      <div class="industry-card live"><div class="ind-icon">📈</div><div class="ind-name">Sales</div><div class="ind-badge">Live</div></div>
+      <div class="industry-card live"><div class="ind-icon">📦</div><div class="ind-name">Inventory</div><div class="ind-badge">Live</div></div>
+      <div class="industry-card live"><div class="ind-icon">👥</div><div class="ind-name">HR & Payroll</div><div class="ind-badge">Live</div></div>
+      <div class="industry-card live"><div class="ind-icon">💰</div><div class="ind-name">Finance</div><div class="ind-badge">Live</div></div>
+      <div class="industry-card"><div class="ind-icon">🛒</div><div class="ind-name">Retail & E-com</div><div class="ind-badge soon">Soon</div></div>
+      <div class="industry-card"><div class="ind-icon">🚚</div><div class="ind-name">Logistics</div><div class="ind-badge soon">Soon</div></div>
+      <div class="industry-card"><div class="ind-icon">🏥</div><div class="ind-name">Healthcare</div><div class="ind-badge soon">Soon</div></div>
+      <div class="industry-card"><div class="ind-icon">🍽️</div><div class="ind-name">Restaurant</div><div class="ind-badge soon">Soon</div></div>
+      <div class="industry-card"><div class="ind-icon">🏭</div><div class="ind-name">Manufacturing</div><div class="ind-badge soon">Soon</div></div>
+      <div class="industry-card"><div class="ind-icon">📣</div><div class="ind-name">Marketing</div><div class="ind-badge soon">Soon</div></div>
+      <div class="industry-card"><div class="ind-icon">🎓</div><div class="ind-name">Education</div><div class="ind-badge soon">Soon</div></div>
+      <div class="industry-card"><div class="ind-icon">🏨</div><div class="ind-name">Hospitality</div><div class="ind-badge soon">Soon</div></div>
+      <div class="industry-card"><div class="ind-icon">🌾</div><div class="ind-name">Agriculture</div><div class="ind-badge soon">Soon</div></div>
+      <div class="industry-card"><div class="ind-icon">🏗️</div><div class="ind-name">Construction</div><div class="ind-badge soon">Soon</div></div>
+      <div class="industry-card"><div class="ind-icon">🏦</div><div class="ind-name">Microfinance</div><div class="ind-badge soon">Soon</div></div>
+      <div class="industry-card"><div class="ind-icon">⚖️</div><div class="ind-name">Legal & Prof.</div><div class="ind-badge soon">Soon</div></div>
+      <div class="industry-card"><div class="ind-icon">📡</div><div class="ind-name">Telecom/SaaS</div><div class="ind-badge soon">Soon</div></div>
+      <div class="industry-card"><div class="ind-icon">🏘️</div><div class="ind-name">Real Estate</div><div class="ind-badge soon">Soon</div></div>
+      <div class="industry-card"><div class="ind-icon">🌍</div><div class="ind-name">NGO/Non-profit</div><div class="ind-badge soon">Soon</div></div>
+      <div class="industry-card"><div class="ind-icon">🔬</div><div class="ind-name">Research</div><div class="ind-badge soon">Soon</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features" id="features">
+  <div class="section-inner">
+    <div style="text-align:center;">
+      <span class="section-tag">Features</span>
+      <h2 class="section-title">Everything a data scientist does.<br/>In 60 seconds.</h2>
+      <p class="section-sub" style="margin: 0 auto; text-align:center;">Built with statistical methods and rule-based intelligence — no AI API costs, no hallucinations, 100% reliable.</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feat-icon">🧹</div>
+        <div class="feat-title">Smart Data Cleaning</div>
+        <div class="feat-desc">Automatically fixes 23 types of Excel problems before analysis begins.</div>
+        <div class="feat-list">
+          <div class="feat-item">Detects real header row</div>
+          <div class="feat-item">Converts text-numbers (₹1,000 → 1000)</div>
+          <div class="feat-item">Standardises mixed date formats</div>
+          <div class="feat-item">Removes garbage & duplicate rows</div>
+        </div>
+      </div>
+      <div class="feature-card">
+        <div class="feat-icon">📊</div>
+        <div class="feat-title">Instant Visual Analysis</div>
+        <div class="feat-desc">Beautiful charts and tables generated automatically from your data.</div>
+        <div class="feat-list">
+          <div class="feat-item">Revenue trends & breakdowns</div>
+          <div class="feat-item">Product & SKU performance</div>
+          <div class="feat-item">Team & territory comparisons</div>
+          <div class="feat-item">ABC analysis & Pareto 80/20</div>
+        </div>
+      </div>
+      <div class="feature-card">
+        <div class="feat-icon">🔮</div>
+        <div class="feat-title">6-Month Forecasting</div>
+        <div class="feat-desc">Statistical trend analysis predicts where your business is headed.</div>
+        <div class="feat-list">
+          <div class="feat-item">Linear regression forecasting</div>
+          <div class="feat-item">Confidence range shown</div>
+          <div class="feat-item">Upward/downward trend alerts</div>
+          <div class="feat-item">Month-by-month prediction table</div>
+        </div>
+      </div>
+      <div class="feature-card">
+        <div class="feat-icon">🚨</div>
+        <div class="feat-title">Rule-Based Smart Alerts</div>
+        <div class="feat-desc">Automatically flags problems before they become crises.</div>
+        <div class="feat-list">
+          <div class="feat-item">Out of stock & reorder warnings</div>
+          <div class="feat-item">Price inconsistency detection</div>
+          <div class="feat-item">Attrition risk flagging</div>
+          <div class="feat-item">Budget overspend alerts</div>
+        </div>
+      </div>
+      <div class="feature-card">
+        <div class="feat-icon">🔍</div>
+        <div class="feat-title">Interactive Filters</div>
+        <div class="feat-desc">Drill into any slice of your data with one click.</div>
+        <div class="feat-list">
+          <div class="feat-item">Filter by region, category, dept</div>
+          <div class="feat-item">Compare teams side by side</div>
+          <div class="feat-item">Date range selection</div>
+          <div class="feat-item">Multi-sheet Excel support</div>
+        </div>
+      </div>
+      <div class="feature-card">
+        <div class="feat-icon">📄</div>
+        <div class="feat-title">One-Click PDF Reports</div>
+        <div class="feat-desc">Professional reports ready to share with your board or clients.</div>
+        <div class="feat-list">
+          <div class="feat-item">Branded Velytics report</div>
+          <div class="feat-item">Charts + KPIs + alerts included</div>
+          <div class="feat-item">Generated in under 10 seconds</div>
+          <div class="feat-item">Download & share instantly</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMPARISON -->
+<section class="comparison" id="comparison">
+  <div class="section-inner">
+    <div style="text-align:center;">
+      <span class="section-tag">Why Velytics</span>
+      <h2 class="section-title">The only analytics tool built<br/>for real-world business data</h2>
+    </div>
+    <table class="comp-table">
+      <thead>
+        <tr>
+          <th>Feature</th>
+          <th class="hl">⚡ Velytics</th>
+          <th>Power BI</th>
+          <th>Tableau</th>
+          <th>Hiring a Data Scientist</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Works with messy Excel files</td><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td><td class="part">Manual</td></tr>
+        <tr><td>Zero technical skills needed</td><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td><td class="yes">✓</td></tr>
+        <tr><td>Ready in under 60 seconds</td><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td><td class="no">✗</td></tr>
+        <tr><td>Auto data cleaning</td><td class="yes">✓</td><td class="no">✗</td><td class="no">✗</td><td class="part">Sometimes</td></tr>
+        <tr><td>Industry-specific analysis</td><td class="yes">✓</td><td class="part">Generic</td><td class="part">Generic</td><td class="yes">✓</td></tr>
+        <tr><td>Smart alerts & forecasting</td><td class="yes">✓</td><td class="part">Add-on</td><td class="part">Add-on</td><td class="yes">✓</td></tr>
+        <tr><td>Cost per month</td><td style="color:#166534;font-weight:700;">$29–$79</td><td class="part">$10–$20+setup</td><td class="part">$70+</td><td class="no">$5,000–$15,000</td></tr>
+        <tr><td>Data privacy (never stored)</td><td class="yes">✓</td><td class="part">Cloud stored</td><td class="part">Cloud stored</td><td class="no">✗</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- TESTIMONIALS -->
+<section class="testimonials" id="testimonials">
+  <div class="section-inner">
+    <div style="text-align:center;">
+      <span class="section-tag">Customer Stories</span>
+      <h2 class="section-title">Businesses that stopped guessing<br/>and started knowing</h2>
+    </div>
+    <div class="testi-grid">
+      <div class="testi-card">
+        <div class="testi-stars">★★★★★</div>
+        <div class="testi-text">"I was spending 3 hours every Monday building a sales report in Excel. With Velytics I upload the file and the report is done in 60 seconds. My regional managers get the insights same morning now."</div>
+        <div class="testi-author">
+          <div class="testi-avatar" style="background:#6366f1;">R</div>
+          <div><div class="testi-name">Rahul Sharma</div><div class="testi-role">Sales Director, FMCG Company · Mumbai</div></div>
+        </div>
+      </div>
+      <div class="testi-card">
+        <div class="testi-stars">★★★★★</div>
+        <div class="testi-text">"Our inventory had 200+ SKUs and we had no idea which were dead stock. Velytics found ₹12 lakhs locked in products that hadn't sold in 6 months. We liquidated and reinvested. Game changer."</div>
+        <div class="testi-author">
+          <div class="testi-avatar" style="background:#10b981;">P</div>
+          <div><div class="testi-name">Priya Nair</div><div class="testi-role">Operations Head, Retail Chain · Bangalore</div></div>
+        </div>
+      </div>
+      <div class="testi-card">
+        <div class="testi-stars">★★★★★</div>
+        <div class="testi-text">"We tried Power BI but it needed a consultant to set up. Velytics just worked — uploaded our HR spreadsheet and immediately saw which departments had attrition risk. No setup, no training, no consultant."</div>
+        <div class="testi-author">
+          <div class="testi-avatar" style="background:#f59e0b;">S</div>
+          <div><div class="testi-name">Sarah Mitchell</div><div class="testi-role">HR Manager, Tech Startup · London</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section class="pricing" id="pricing">
+  <div class="section-inner">
+    <div style="text-align:center;">
+      <span class="section-tag">Pricing</span>
+      <h2 class="section-title">Less than your daily coffee.<br/>More valuable than a consultant.</h2>
+      <p class="section-sub" style="margin: 0 auto; text-align:center;">Start free. No credit card needed. Cancel anytime.</p>
+    </div>
+    <div class="pricing-grid">
+      <div class="price-card">
+        <div class="price-name">Starter</div>
+        <div class="price-amount"><span class="price-curr">$</span><span class="price-num">0</span></div>
+        <div class="price-desc">Free forever · No credit card · 5 uploads/month</div>
+        <div class="price-features">
+          <div class="pf">All 4 core modules</div>
+          <div class="pf">Smart data cleaning</div>
+          <div class="pf">5 file uploads per month</div>
+          <div class="pf">PDF report downloads</div>
+          <div class="pf no-feat">Advanced filters</div>
+          <div class="pf no-feat">Unlimited uploads</div>
+          <div class="pf no-feat">Priority support</div>
+        </div>
+        <a href="https://velytics.streamlit.app" target="_blank" class="price-btn price-btn-outline">Start free →</a>
+      </div>
+      <div class="price-card popular">
+        <div class="popular-badge">⭐ Most Popular</div>
+        <div class="price-name">Professional</div>
+        <div class="price-amount"><span class="price-curr">$</span><span class="price-num">29</span><span class="price-period">/month</span></div>
+        <div class="price-desc">Billed monthly · Cancel anytime · 1 user</div>
+        <div class="price-features">
+          <div class="pf">All 4 core modules</div>
+          <div class="pf">Smart data cleaning</div>
+          <div class="pf">Unlimited uploads</div>
+          <div class="pf">Advanced filters & drill-down</div>
+          <div class="pf">PDF + Excel report export</div>
+          <div class="pf">Priority email support</div>
+          <div class="pf no-feat">Team seats</div>
+        </div>
+        <a href="https://velytics.streamlit.app" target="_blank" class="price-btn price-btn-filled">Get started →</a>
+      </div>
+      <div class="price-card">
+        <div class="price-name">Business</div>
+        <div class="price-amount"><span class="price-curr">$</span><span class="price-num">79</span><span class="price-period">/month</span></div>
+        <div class="price-desc">Up to 5 users · All modules · Priority support</div>
+        <div class="price-features">
+          <div class="pf">Everything in Professional</div>
+          <div class="pf">Up to 5 team seats</div>
+          <div class="pf">All 20 industry modules</div>
+          <div class="pf">Custom branding on reports</div>
+          <div class="pf">Dedicated onboarding call</div>
+          <div class="pf">Priority phone & chat support</div>
+          <div class="pf">Early access to new modules</div>
+        </div>
+        <a href="mailto:rawatdhiraj007@gmail.com" class="price-btn price-btn-dark">Contact us →</a>
+      </div>
+    </div>
+    <p style="text-align:center; color:var(--g400); font-size:0.82rem; margin-top:24px;">🔒 All plans include: data never stored · GDPR compliant · SSL encrypted</p>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="faq" id="faq">
+  <div class="section-inner">
+    <div style="text-align:center;">
+      <span class="section-tag">FAQ</span>
+      <h2 class="section-title">Common questions</h2>
+    </div>
+    <div class="faq-grid">
+      <div class="faq-item" onclick="toggleFaq(this)">
+        <div class="faq-q">Do I need any technical skills? <span class="faq-arrow">▼</span></div>
+        <div class="faq-a">Absolutely not. If you can upload a file, you can use Velytics. No SQL, no Python, no data science knowledge required. We built it specifically for business owners, managers, and teams who want answers — not tools.</div>
+      </div>
+      <div class="faq-item" onclick="toggleFaq(this)">
+        <div class="faq-q">Is my data safe? <span class="faq-arrow">▼</span></div>
+        <div class="faq-a">Yes. Your data is processed in memory and deleted immediately after analysis. We never store, share, or use your data for any purpose. No database, no cloud storage, no logs. Your file stays yours.</div>
+      </div>
+      <div class="faq-item" onclick="toggleFaq(this)">
+        <div class="faq-q">What file formats does Velytics accept? <span class="faq-arrow">▼</span></div>
+        <div class="faq-a">We accept Excel (.xlsx, .xls) and CSV files. Multi-sheet Excel files are supported — you can pick which sheet to analyse. File size up to 200MB. If your file is messy, that's fine — our Smart Clean engine handles it.</div>
+      </div>
+      <div class="faq-item" onclick="toggleFaq(this)">
+        <div class="faq-q">What if my Excel file is messy or has multiple headers? <span class="faq-arrow">▼</span></div>
+        <div class="faq-a">That's exactly what Velytics is built for. Our Smart Clean engine automatically detects the real header row, removes title rows, converts text-numbers, standardises dates, and removes garbage. 23 types of Excel problems are fixed automatically before analysis begins.</div>
+      </div>
+      <div class="faq-item" onclick="toggleFaq(this)">
+        <div class="faq-q">How is Velytics different from Power BI or Tableau? <span class="faq-arrow">▼</span></div>
+        <div class="faq-a">Power BI and Tableau are powerful but require setup, training, and clean data. Velytics requires nothing — upload and get insights in 60 seconds. We also auto-clean your data, which BI tools cannot do. And we're 90% cheaper.</div>
+      </div>
+      <div class="faq-item" onclick="toggleFaq(this)">
+        <div class="faq-q">Can I cancel my subscription anytime? <span class="faq-arrow">▼</span></div>
+        <div class="faq-a">Yes, cancel anytime with one click. No contracts, no cancellation fees, no questions asked. You can also start with the free plan and upgrade only when you need more uploads.</div>
+      </div>
+      <div class="faq-item" onclick="toggleFaq(this)">
+        <div class="faq-q">Which industries does Velytics support? <span class="faq-arrow">▼</span></div>
+        <div class="faq-a">Currently live: Sales, Inventory, HR & Payroll, Finance & Accounting. Coming soon: Retail, Logistics, Healthcare, Restaurant, Manufacturing, Marketing, Education, Hospitality, Agriculture, and more — 20 industries total by end of year.</div>
+      </div>
+      <div class="faq-item" onclick="toggleFaq(this)">
+        <div class="faq-q">Do you offer a free trial? <span class="faq-arrow">▼</span></div>
+        <div class="faq-a">Yes — our Starter plan is free forever with 5 uploads per month. No credit card needed. Just sign up and upload your first file. You'll see results in under 60 seconds.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div style="max-width: 700px; margin: 0 auto;">
+    <h2>Your competitors already know<br/><em>what their data is telling them.</em></h2>
+    <p>Stop guessing. Stop hiring consultants. Stop spending weekends in Excel. Get answers in 60 seconds.</p>
+    <div class="cta-actions">
+      <a href="https://velytics.streamlit.app" target="_blank" class="btn-primary" style="font-size:1rem; padding:16px 32px;">⚡ Try Velytics free — no credit card</a>
+    </div>
+    <p class="cta-note">Free plan available · 4 modules live · 500+ businesses already using it</p>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-logo">Vely<span>tics</span></div>
+    <div class="footer-links">
+      <a href="#how-it-works">How it works</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+      <a href="mailto:rawatdhiraj007@gmail.com">Contact</a>
+    </div>
+    <div class="footer-copy">© 2025 Velytics. Your data scientist. No hiring required.</div>
+  </div>
+</footer>
+
+<script>
+function toggleFaq(el) {
+  el.classList.toggle('open');
+}
+</script>
+</body>
+</html>
