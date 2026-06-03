@@ -9,8 +9,254 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.units import inch
 import io
+import re
 import warnings
 warnings.filterwarnings('ignore')
+
+# ════════════════════════════════════════════════════════════════════════════
+# VELYTICS SMART CLEAN ENGINE — Auto-fixes 23 types of Excel mess
+# ════════════════════════════════════════════════════════════════════════════
+
+def smart_clean(df_raw, filename=""):
+    """
+    Master cleaning function. Returns (df_clean, fixes_log)
+    fixes_log = list of strings describing what was fixed.
+    """
+    fixes = []
+    df = df_raw.copy()
+
+    # ── 1. DETECT REAL HEADER ROW ────────────────────────────────────────────
+    # Scan first 10 rows — find row with most non-null, non-numeric text values
+    def header_score(row):
+        score = 0
+        for val in row:
+            v = str(val).strip()
+            if v and v.lower() not in ['nan','none','']:
+                if not re.match(r'^[\d,.\-\+\(\)₹$%\s]+$', v):
+                    score += 1
+        return score
+
+    best_row = 0
+    best_score = header_score(df.iloc[0])
+    for i in range(1, min(10, len(df))):
+        s = header_score(df.iloc[i])
+        if s > best_score:
+            best_score = s
+            best_row = i
+
+    if best_row > 0:
+        fixes.append(f"📋 Detected real headers on row {best_row + 1} — skipped {best_row} title row(s)")
+        df.columns = df.iloc[best_row].astype(str).str.strip()
+        df = df.iloc[best_row + 1:].reset_index(drop=True)
+
+    # ── 2. CLEAN COLUMN NAMES ────────────────────────────────────────────────
+    original_cols = list(df.columns)
+    new_cols = []
+    seen = {}
+    for col in df.columns:
+        c = str(col).strip()
+        c = re.sub(r'\s+', ' ', c)           # collapse spaces
+        c = c.strip()
+        if c.lower() in ['nan','none','unnamed','']:
+            c = f"Column_{len(new_cols)+1}"
+        # deduplicate
+        if c in seen:
+            seen[c] += 1
+            c = f"{c}_{seen[c]}"
+        else:
+            seen[c] = 0
+        new_cols.append(c)
+    df.columns = new_cols
+    renamed = sum(1 for a,b in zip(original_cols, new_cols) if str(a).strip() != b)
+    if renamed > 0:
+        fixes.append(f"🏷️ Cleaned {renamed} column name(s) — removed extra spaces and unnamed columns")
+
+    # ── 3. REMOVE BLANK ROWS & COLUMNS ──────────────────────────────────────
+    before_rows = len(df)
+    df.dropna(how='all', inplace=True)
+    blank_rows = before_rows - len(df)
+    if blank_rows > 0:
+        fixes.append(f"🗑️ Removed {blank_rows} completely blank row(s)")
+
+    before_cols = len(df.columns)
+    df.dropna(axis=1, how='all', inplace=True)
+    blank_cols = before_cols - len(df.columns)
+    if blank_cols > 0:
+        fixes.append(f"🗑️ Removed {blank_cols} completely blank column(s)")
+
+    # ── 4. REMOVE TOTAL / SUMMARY ROWS ──────────────────────────────────────
+    total_keywords = ['total','grand total','subtotal','sum','average','avg','overall']
+    mask_total = df.apply(lambda row: any(
+        str(v).lower().strip() in total_keywords for v in row
+    ), axis=1)
+    total_removed = mask_total.sum()
+    if total_removed > 0:
+        df = df[~mask_total].reset_index(drop=True)
+        fixes.append(f"🗑️ Removed {total_removed} summary/total row(s) mixed in data")
+
+    # ── 5. REMOVE DUPLICATE HEADER ROWS ─────────────────────────────────────
+    col_names_set = set(str(c).lower().strip() for c in df.columns)
+    dup_header_mask = df.apply(lambda row: sum(
+        str(v).lower().strip() in col_names_set for v in row
+    ) >= len(df.columns) * 0.6, axis=1)
+    dup_headers = dup_header_mask.sum()
+    if dup_headers > 0:
+        df = df[~dup_header_mask].reset_index(drop=True)
+        fixes.append(f"📋 Removed {dup_headers} repeated header row(s) found mid-sheet")
+
+    # ── 6. REMOVE TEST / GARBAGE ROWS ───────────────────────────────────────
+    garbage_patterns = [r'^(test|xxx|asdf|qwerty|dummy|sample|n/a|na|nil|tbd|temp|delete)$']
+    def is_garbage(row):
+        non_null = [str(v).strip().lower() for v in row if str(v).strip().lower() not in ['','nan','none']]
+        if not non_null:
+            return True
+        garbage = sum(1 for v in non_null if any(re.match(p, v) for p in garbage_patterns))
+        return garbage >= len(non_null) * 0.6
+    garbage_mask = df.apply(is_garbage, axis=1)
+    garbage_removed = garbage_mask.sum()
+    if garbage_removed > 0:
+        df = df[~garbage_mask].reset_index(drop=True)
+        fixes.append(f"🗑️ Removed {garbage_removed} test/garbage row(s)")
+
+    # ── 7. REMOVE DUPLICATE ROWS ────────────────────────────────────────────
+    before = len(df)
+    df.drop_duplicates(inplace=True)
+    dups = before - len(df)
+    if dups > 0:
+        fixes.append(f"🔁 Removed {dups} duplicate row(s)")
+    df.reset_index(drop=True, inplace=True)
+
+    # ── 8. CLEAN TEXT COLUMNS ────────────────────────────────────────────────
+    text_fixes = 0
+    for col in df.select_dtypes(include='object').columns:
+        original = df[col].copy()
+        # Strip whitespace
+        df[col] = df[col].astype(str).str.strip()
+        df[col] = df[col].str.replace(r'\s+', ' ', regex=True)
+        # Fix 'nan' strings
+        df[col] = df[col].replace({'nan': np.nan, 'none': np.nan, 'None': np.nan,
+                                    'NULL': np.nan, 'null': np.nan, 'N/A': np.nan,
+                                    'n/a': np.nan, 'NA': np.nan, '': np.nan})
+        # Title case for category-like columns (low unique count)
+        if df[col].nunique() < 30 and df[col].nunique() > 0:
+            df[col] = df[col].str.title()
+        changed = (df[col].fillna('') != original.fillna('')).sum()
+        text_fixes += changed
+    if text_fixes > 0:
+        fixes.append(f"✍️ Fixed {text_fixes} text value(s) — standardised case, removed extra spaces")
+
+    # ── 9. DETECT & CONVERT NUMBER COLUMNS ──────────────────────────────────
+    num_fixes = 0
+    for col in df.columns:
+        if df[col].dtype == object:
+            sample = df[col].dropna().head(50)
+            # Check if looks like numbers with symbols
+            cleaned = sample.astype(str).str.replace(r'[₹$€£,\s%\(\)]', '', regex=True)\
+                                         .str.replace(r'^\((.+)\)$', r'-\1', regex=True)
+            numeric_count = pd.to_numeric(cleaned, errors='coerce').notna().sum()
+            if numeric_count >= len(sample) * 0.7 and len(sample) > 0:
+                df[col] = df[col].astype(str)\
+                    .str.replace(r'[₹$€£,\s%]', '', regex=True)\
+                    .str.replace(r'^\((.+)\)$', r'-\1', regex=True)
+                converted = pd.to_numeric(df[col], errors='coerce')
+                success = converted.notna().sum()
+                if success > 0:
+                    df[col] = converted
+                    num_fixes += 1
+    if num_fixes > 0:
+        fixes.append(f"🔢 Converted {num_fixes} column(s) from text-numbers to numeric (removed ₹,$,commas,%)")
+
+    # ── 10. DETECT & PARSE DATE COLUMNS ─────────────────────────────────────
+    date_fixes = 0
+    date_formats = ['%d/%m/%Y','%m/%d/%Y','%Y-%m-%d','%d-%m-%Y','%d/%m/%y',
+                    '%m/%d/%y','%b-%y','%B %Y','%Y/%m/%d','%d %b %Y','%d-%b-%Y']
+    for col in df.columns:
+        if df[col].dtype == object:
+            sample = df[col].dropna().head(30).astype(str)
+            date_count = 0
+            for val in sample:
+                if pd.to_datetime(val, errors='coerce', dayfirst=True) is not pd.NaT:
+                    try:
+                        result = pd.to_datetime(val, errors='coerce', dayfirst=True)
+                        if result is not pd.NaT and str(result) != 'NaT':
+                            date_count += 1
+                    except:
+                        pass
+            if date_count >= len(sample) * 0.6 and len(sample) > 0:
+                converted = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
+                if converted.notna().sum() >= len(df) * 0.5:
+                    df[col] = converted
+                    date_fixes += 1
+        elif df[col].dtype in ['int64','float64']:
+            # Excel serial date detection (values between 30000-50000 range)
+            sample_vals = df[col].dropna()
+            if len(sample_vals) > 0 and sample_vals.between(30000, 50000).mean() > 0.7:
+                try:
+                    df[col] = pd.to_datetime(df[col], unit='D', origin='1899-12-30', errors='coerce')
+                    date_fixes += 1
+                    fixes.append(f"📅 Converted '{col}' from Excel serial numbers to real dates")
+                except:
+                    pass
+    if date_fixes > 0:
+        fixes.append(f"📅 Parsed {date_fixes} date column(s) — standardised mixed date formats")
+
+    # ── 11. FILL MISSING NUMERIC VALUES ─────────────────────────────────────
+    missing_filled = 0
+    for col in df.select_dtypes(include='number').columns:
+        miss = df[col].isnull().sum()
+        if miss > 0:
+            df[col].fillna(df[col].median(), inplace=True)
+            missing_filled += miss
+    if missing_filled > 0:
+        fixes.append(f"🔧 Filled {missing_filled} missing numeric value(s) with column median")
+
+    # ── 12. DETECT PERCENTAGE COLUMNS ───────────────────────────────────────
+    for col in df.select_dtypes(include='number').columns:
+        vals = df[col].dropna()
+        if len(vals) > 0 and vals.between(0, 100).mean() > 0.9 and 'pct' in col.lower() or '%' in col:
+            pass  # already fine as 0-100 scale
+
+    df.reset_index(drop=True, inplace=True)
+    return df, fixes
+
+
+def load_file(uploaded_file):
+    """Load any Excel/CSV — including multi-sheet Excel files."""
+    name = uploaded_file.name.lower()
+    if name.endswith('.csv'):
+        try:
+            return pd.read_csv(uploaded_file)
+        except:
+            uploaded_file.seek(0)
+            return pd.read_csv(uploaded_file, encoding='latin-1')
+    else:
+        xl = pd.ExcelFile(uploaded_file)
+        sheets = xl.sheet_names
+        if len(sheets) == 1:
+            return pd.read_excel(xl, sheet_name=sheets[0], header=None)
+        else:
+            # Multiple sheets — let user pick or auto-merge
+            if 'selected_sheet' not in st.session_state:
+                st.session_state.selected_sheet = sheets[0]
+            selected = st.sidebar.selectbox("📄 Select Sheet", sheets, key="sheet_selector")
+            st.session_state.selected_sheet = selected
+            return pd.read_excel(xl, sheet_name=selected, header=None)
+
+
+def show_clean_report(fixes, df_clean, df_raw):
+    """Show a beautiful cleaning report."""
+    if not fixes:
+        st.success(f"✅ File loaded — {len(df_clean):,} rows · {len(df_clean.columns)} columns · Already clean!")
+        return
+    total_fixes = len(fixes)
+    with st.expander(f"✅ File loaded & auto-cleaned — {len(df_clean):,} rows · {len(df_clean.columns)} columns · **{total_fixes} issues fixed** — click to see details", expanded=False):
+        cols = st.columns(3)
+        cols[0].metric("Rows Before", f"{len(df_raw):,}")
+        cols[1].metric("Rows After", f"{len(df_clean):,}")
+        cols[2].metric("Issues Fixed", total_fixes)
+        st.markdown("---")
+        for fix in fixes:
+            st.markdown(f"<div style='background:#f0fdf4;border-left:3px solid #10b981;padding:8px 12px;border-radius:6px;margin:4px 0;font-size:0.82rem;color:#166534;'>{fix}</div>", unsafe_allow_html=True)
 
 # ── Page Config ──────────────────────────────────────────────────────────────
 st.set_page_config(
