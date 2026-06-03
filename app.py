@@ -13,6 +13,10 @@ import re
 import warnings
 warnings.filterwarnings('ignore')
 
+def nc(series):
+    """Safely coerce a pandas Series to numeric — returns 0 for non-numeric/NaN values."""
+    return pd.to_numeric(series, errors='coerce').fillna(0)
+
 # ════════════════════════════════════════════════════════════════════════════
 # VELYTICS SMART CLEAN ENGINE — Auto-fixes 23 types of Excel mess
 # ════════════════════════════════════════════════════════════════════════════
@@ -179,12 +183,12 @@ def smart_clean(df_raw, filename=""):
             # Check if looks like numbers with symbols
             cleaned = sample.astype(str).str.replace(r'[₹$€£,\s%\(\)]', '', regex=True)\
                                          .str.replace(r'^\((.+)\)$', r'-\1', regex=True)
-            numeric_count = pd.to_numeric(cleaned, errors='coerce').notna().sum()
+            numeric_count = nc(cleaned).notna().sum()
             if numeric_count >= len(sample) * 0.7 and len(sample) > 0:
                 df[col] = df[col].astype(str)\
                     .str.replace(r'[₹$€£,\s%]', '', regex=True)\
                     .str.replace(r'^\((.+)\)$', r'-\1', regex=True)
-                converted = pd.to_numeric(df[col], errors='coerce')
+                converted = nc(df[col])
                 success = converted.notna().sum()
                 if success > 0:
                     df[col] = converted
@@ -231,7 +235,7 @@ def smart_clean(df_raw, filename=""):
     for col in df.select_dtypes(include='number').columns:
         miss = df[col].isnull().sum()
         if miss > 0:
-            df[col].fillna(df[col].median(), inplace=True)
+            df[col] = df[col].fillna(df[col].median())
             missing_filled += miss
     if missing_filled > 0:
         fixes.append(f"🔧 Filled {missing_filled} missing numeric value(s) with column median")
@@ -899,28 +903,28 @@ if module == "HR & Payroll":
         df_hf = df_hr.copy()
         if dept_col:
             depts = ['All Departments'] + sorted(df_hr[dept_col].dropna().unique().tolist())
-            sd = st.selectbox("Department", depts)
+            sd = st.selectbox("Department", depts, key="hr_dept")
             if sd != 'All Departments': df_hf = df_hf[df_hf[dept_col] == sd]
         if gender_col:
             genders = ['All'] + sorted(df_hr[gender_col].dropna().unique().tolist())
-            sg = st.selectbox("Gender", genders)
+            sg = st.selectbox("Gender", genders, key="hr_gender")
             if sg != 'All': df_hf = df_hf[df_hf[gender_col] == sg]
         if status_col:
             statuses = ['All'] + sorted(df_hr[status_col].dropna().unique().tolist())
-            ss = st.selectbox("Status", statuses)
+            ss = st.selectbox("Status", statuses, key="hr_status")
             if ss != 'All': df_hf = df_hf[df_hf[status_col] == ss]
         if loc_col:
             locs = ['All'] + sorted(df_hr[loc_col].dropna().unique().tolist())
-            sl = st.selectbox("Location", locs)
+            sl = st.selectbox("Location", locs, key="hr_loc")
             if sl != 'All': df_hf = df_hf[df_hf[loc_col] == sl]
         st.caption(f"**{len(df_hf)}** of **{len(df_hr)}** employees")
 
     # KPIs
     total_emp  = len(df_hf)
-    total_pay  = df_hf[salary_col].sum() if salary_col else 0
-    avg_salary = df_hf[salary_col].mean() if salary_col else 0
+    total_pay  = nc(df_hf[salary_col]).sum() if salary_col else 0
+    avg_salary = nc(df_hf[salary_col]).mean() or 0 if salary_col else 0
     num_depts  = df_hf[dept_col].nunique() if dept_col else 0
-    avg_perf   = df_hf[perf_col].mean() if perf_col else 0
+    avg_perf   = nc(df_hf[perf_col]).mean() or 0 if perf_col else 0
     ot_alert   = (df_hf[overtime_col] > 20).sum() if overtime_col else 0
 
     kpi_row([
@@ -1120,7 +1124,7 @@ if module == "HR & Payroll":
                 fig, ax = plt.subplots(figsize=(6,4))
                 clean_chart(fig, ax)
                 ax.hist(df_hf[age_col].dropna(), bins=10, color='#6366f1', edgecolor='white', linewidth=1.5)
-                ax.axvline(df_hf[age_col].mean(), color='#ef4444', linestyle='--', label=f"Avg: {df_hf[age_col].mean():.0f} yrs")
+                ax.axvline(nc(df_hf[age_col]).mean() or 0, color='#ef4444', linestyle='--', label=f"Avg: {nc(df_hf[age_col]).mean() or 0:.0f} yrs")
                 ax.set_title("Age Distribution", fontweight='bold')
                 ax.set_xlabel("Age")
                 ax.legend()
@@ -1130,7 +1134,7 @@ if module == "HR & Payroll":
                 fig, ax = plt.subplots(figsize=(6,4))
                 clean_chart(fig, ax)
                 ax.hist(df_hf[exp_col].dropna(), bins=10, color='#818cf8', edgecolor='white', linewidth=1.5)
-                ax.axvline(df_hf[exp_col].mean(), color='#ef4444', linestyle='--', label=f"Avg: {df_hf[exp_col].mean():.1f} yrs")
+                ax.axvline(nc(df_hf[exp_col]).mean() or 0, color='#ef4444', linestyle='--', label=f"Avg: {nc(df_hf[exp_col]).mean() or 0:.1f} yrs")
                 ax.set_title("Experience Distribution", fontweight='bold')
                 ax.set_xlabel("Years of Experience")
                 ax.legend()
@@ -1192,11 +1196,11 @@ if module == "Finance & Accounting":
         df_ff = df_fin.copy()
         if type_col:
             types = ['All'] + sorted(df_fin[type_col].dropna().unique().tolist())
-            st_ = st.selectbox("Type", types)
+            st_ = st.selectbox("Type", types, key="fin_type")
             if st_ != 'All': df_ff = df_ff[df_ff[type_col] == st_]
         if dept_col:
             depts = ['All'] + sorted(df_fin[dept_col].dropna().unique().tolist())
-            sd = st.selectbox("Department", depts)
+            sd = st.selectbox("Department", depts, key="fin_dept")
             if sd != 'All': df_ff = df_ff[df_ff[dept_col] == sd]
         st.caption(f"**{len(df_ff)}** of **{len(df_fin)}** records")
 
@@ -1204,8 +1208,8 @@ if module == "Finance & Accounting":
     if type_col and amount_col:
         rev_keywords  = ['revenue','income','sales','receipt','inflow']
         exp_keywords  = ['expense','cost','expenditure','payment','outflow','salary','rent']
-        rev_mask = df_ff[type_col].str.lower().str.contains('|'.join(rev_keywords), na=False)
-        exp_mask = df_ff[type_col].str.lower().str.contains('|'.join(exp_keywords), na=False)
+        rev_mask = df_ff[type_col].astype(str).str.lower().str.contains('|'.join(rev_keywords), na=False)
+        exp_mask = df_ff[type_col].astype(str).str.lower().str.contains('|'.join(exp_keywords), na=False)
         total_rev = df_ff[rev_mask][amount_col].sum() if rev_mask.sum() > 0 else 0
         total_exp = df_ff[exp_mask][amount_col].sum() if exp_mask.sum() > 0 else 0
     elif amount_col:
@@ -1218,7 +1222,7 @@ if module == "Finance & Accounting":
     profit_margin = (net_profit / total_rev * 100) if total_rev > 0 else 0
     budget_var    = 0
     if budget_col and amount_col:
-        budget_var = df_ff[amount_col].sum() - df_ff[budget_col].sum()
+        budget_var = nc(df_ff[amount_col]).sum() - nc(df_ff[budget_col]).sum()
 
     kpi_row([
         (f"${total_rev:,.0f}", "Total Revenue", "green", "↑ Inflows"),
@@ -1351,8 +1355,8 @@ if module == "Finance & Accounting":
             sh("📉","Budget vs Actual Analysis")
             df_ff['Variance'] = df_ff[amount_col] - df_ff[budget_col]
             df_ff['Variance %'] = (df_ff['Variance'] / df_ff[budget_col] * 100).round(1)
-            total_budget  = df_ff[budget_col].sum()
-            total_actual  = df_ff[amount_col].sum()
+            total_budget  = nc(df_ff[budget_col]).sum()
+            total_actual  = nc(df_ff[amount_col]).sum()
             total_variance = total_actual - total_budget
 
             kpi_row([
@@ -1458,12 +1462,12 @@ if module == "Retail & E-commerce":
     if date_col: df_ret[date_col] = pd.to_datetime(df_ret[date_col], dayfirst=True, errors='coerce')
 
     # Core metrics
-    total_rev    = df_ret[rev_col].sum() if rev_col else 0
+    total_rev    = nc(df_ret[rev_col]).sum() if rev_col else 0
     total_orders = len(df_ret)
     aov          = total_rev / total_orders if total_orders > 0 else 0
-    return_rate  = (df_ret[return_col].str.upper() == 'YES').mean() * 100 if return_col else 0
-    avg_rating   = df_ret[rating_col].mean() if rating_col else 0
-    new_cust_pct = (df_ret[ctype_col].str.title() == 'New').mean() * 100 if ctype_col else 0
+    return_rate  = (df_ret[return_col].astype(str).str.upper() == 'YES').mean() * 100 if return_col else 0
+    avg_rating   = nc(df_ret[rating_col]).mean() or 0 if rating_col else 0
+    new_cust_pct = (df_ret[ctype_col].astype(str).str.title() == 'New').mean() * 100 if ctype_col else 0
 
     kpi_row([
         (f"₹{total_rev:,.0f}", "Total Revenue", "indigo", None),
@@ -1628,7 +1632,7 @@ if module == "Retail & E-commerce":
         with col_a:
             if return_col:
                 sh("↩️","Returns Analysis")
-                ret_counts = df_ret[return_col].str.title().value_counts()
+                ret_counts = df_ret[return_col].astype(str).str.title().value_counts()
                 fig, ax = plt.subplots(figsize=(5,4))
                 clean_chart(fig, ax)
                 ax.pie(ret_counts.values, labels=ret_counts.index, autopct='%1.1f%%',
@@ -1641,7 +1645,7 @@ if module == "Retail & E-commerce":
                 fig, ax = plt.subplots(figsize=(5,4))
                 clean_chart(fig, ax)
                 ax.hist(df_ret[deliv_col].dropna(), bins=10, color='#818cf8', edgecolor='white', linewidth=1.5)
-                ax.axvline(df_ret[deliv_col].mean(), color='#ef4444', linestyle='--', label=f"Avg: {df_ret[deliv_col].mean():.1f} days")
+                ax.axvline(nc(df_ret[deliv_col]).mean() or 0, color='#ef4444', linestyle='--', label=f"Avg: {nc(df_ret[deliv_col]).mean() or 0:.1f} days")
                 ax.set_title("Delivery Days Distribution", fontweight='bold')
                 ax.set_xlabel("Days")
                 ax.legend()
@@ -1701,11 +1705,11 @@ if module == "Logistics":
     if date_col: df_log[date_col] = pd.to_datetime(df_log[date_col], dayfirst=True, errors='coerce')
 
     total_ship   = len(df_log)
-    ontime_rate  = (df_log[ontime_col].str.upper() == 'YES').mean() * 100 if ontime_col else 0
-    total_cost   = df_log[cost_col].sum() if cost_col else 0
-    damage_rate  = (df_log[damage_col].str.upper() == 'YES').mean() * 100 if damage_col else 0
-    avg_rating   = df_log[rating_col].mean() if rating_col else 0
-    cost_per_km  = (df_log[cost_col].sum() / df_log[dist_col].sum()) if cost_col and dist_col and df_log[dist_col].sum() > 0 else 0
+    ontime_rate  = (df_log[ontime_col].astype(str).str.upper() == 'YES').mean() * 100 if ontime_col else 0
+    total_cost   = nc(df_log[cost_col]).sum() if cost_col else 0
+    damage_rate  = (df_log[damage_col].astype(str).str.upper() == 'YES').mean() * 100 if damage_col else 0
+    avg_rating   = nc(df_log[rating_col]).mean() or 0 if rating_col else 0
+    cost_per_km  = (nc(df_log[cost_col]).sum() / nc(df_log[dist_col]).sum()) if cost_col and dist_col and nc(df_log[dist_col]).sum() > 0 else 0
 
     kpi_row([
         (f"{total_ship:,}", "Total Shipments", "indigo", None),
@@ -1726,7 +1730,7 @@ if module == "Logistics":
         col_a, col_b = st.columns(2)
         with col_a:
             if ontime_col:
-                ot_counts = df_log[ontime_col].str.title().value_counts()
+                ot_counts = df_log[ontime_col].astype(str).str.title().value_counts()
                 fig, ax = plt.subplots(figsize=(5,5))
                 clean_chart(fig, ax)
                 ax.pie(ot_counts.values, labels=ot_counts.index, autopct='%1.1f%%',
@@ -1735,7 +1739,7 @@ if module == "Logistics":
                 plt.tight_layout(); st.pyplot(fig); plt.close()
         with col_b:
             if route_col and ontime_col:
-                route_ot = df_log.groupby(route_col).apply(lambda x: (x[ontime_col].str.upper()=='YES').mean()*100).sort_values()
+                route_ot = df_log.groupby(route_col).apply(lambda x: (x[ontime_col].astype(str).str.upper()=='YES').mean()*100).sort_values()
                 fig, ax = plt.subplots(figsize=(6,4))
                 clean_chart(fig, ax)
                 bar_c = ['#ef4444' if v < 70 else '#f59e0b' if v < 85 else '#10b981' for v in route_ot.values]
@@ -1799,14 +1803,14 @@ if module == "Logistics":
                     Trips=(cost_col,'count'), Total_Cost=(cost_col,'sum')
                 ).reset_index()
                 if ontime_col:
-                    veh_ot = df_log.groupby(vehicle_col).apply(lambda x: (x[ontime_col].str.upper()=='YES').mean()*100).reset_index()
+                    veh_ot = df_log.groupby(vehicle_col).apply(lambda x: (x[ontime_col].astype(str).str.upper()=='YES').mean()*100).reset_index()
                     veh_ot.columns = [vehicle_col,'On_Time_%']
                     veh_stats = veh_stats.merge(veh_ot, on=vehicle_col)
                 st.dataframe(veh_stats.sort_values('Total_Cost', ascending=False).reset_index(drop=True), use_container_width=True)
         with col_b:
             if driver_col and ontime_col:
                 sh("👤","Driver Performance")
-                drv_stats = df_log.groupby(driver_col).apply(lambda x: (x[ontime_col].str.upper()=='YES').mean()*100).sort_values(ascending=False).reset_index()
+                drv_stats = df_log.groupby(driver_col).apply(lambda x: (x[ontime_col].astype(str).str.upper()=='YES').mean()*100).sort_values(ascending=False).reset_index()
                 drv_stats.columns = ['Driver','On-Time %']
                 fig, ax = plt.subplots(figsize=(6,4))
                 clean_chart(fig, ax)
@@ -1824,7 +1828,7 @@ if module == "Logistics":
                 Shipments=(cost_col,'count'), Total_Cost=(cost_col,'sum')
             ).reset_index()
             if damage_col:
-                cargo_dmg = df_log.groupby(cargo_col).apply(lambda x: (x[damage_col].str.upper()=='YES').mean()*100).reset_index()
+                cargo_dmg = df_log.groupby(cargo_col).apply(lambda x: (x[damage_col].astype(str).str.upper()=='YES').mean()*100).reset_index()
                 cargo_dmg.columns = [cargo_col,'Damage_Rate_%']
                 cargo_stats = cargo_stats.merge(cargo_dmg, on=cargo_col)
             fig, ax = plt.subplots(figsize=(8,4))
@@ -1872,16 +1876,16 @@ if module == "Restaurant":
 
     if date_col: df_rest[date_col] = pd.to_datetime(df_rest[date_col], dayfirst=True, errors='coerce')
 
-    total_rev     = df_rest[rev_col].sum() if rev_col else 0
+    total_rev     = nc(df_rest[rev_col]).sum() if rev_col else 0
     total_orders  = len(df_rest)
-    avg_rating    = df_rest[rating_col].mean() if rating_col else 0
+    avg_rating    = nc(df_rest[rating_col]).mean() or 0 if rating_col else 0
     occupancy_rate= (df_rest[tables_col] / df_rest[total_t_col]).mean() * 100 if tables_col and total_t_col else 0
     if sell_col and cost_col:
         df_rest['Food Cost %'] = (df_rest[cost_col] / df_rest[sell_col] * 100).round(1)
         avg_food_cost = df_rest['Food Cost %'].mean()
     else:
         avg_food_cost = 0
-    total_waste = df_rest[waste_col].sum() if waste_col else 0
+    total_waste = nc(df_rest[waste_col]).sum() if waste_col else 0
 
     kpi_row([
         (f"₹{total_rev:,.0f}", "Total Revenue", "indigo", None),
@@ -2048,12 +2052,12 @@ if module == "Healthcare":
 
     if date_col: df_hc[date_col] = pd.to_datetime(df_hc[date_col], dayfirst=True, errors='coerce')
 
-    total_rev     = df_hc[rev_col].sum() if rev_col else 0
+    total_rev     = nc(df_hc[rev_col]).sum() if rev_col else 0
     total_patients= len(df_hc)
-    avg_rating    = df_hc[rating_col].mean() if rating_col else 0
-    readmit_rate  = (df_hc[readmit_col].str.upper()=='YES').mean()*100 if readmit_col else 0
+    avg_rating    = nc(df_hc[rating_col]).mean() or 0 if rating_col else 0
+    readmit_rate  = (df_hc[readmit_col].astype(str).str.upper()=='YES').mean()*100 if readmit_col else 0
     num_doctors   = df_hc[doc_col].nunique() if doc_col else 0
-    budget_var    = (df_hc[rev_col].sum() - df_hc[budget_col].sum()) if rev_col and budget_col else 0
+    budget_var    = (nc(df_hc[rev_col]).sum() - nc(df_hc[budget_col]).sum()) if rev_col and budget_col else 0
 
     kpi_row([
         (f"₹{total_rev:,.0f}", "Total Revenue", "indigo", None),
@@ -2215,14 +2219,14 @@ if module == "Manufacturing":
 
     if date_col: df_mfg[date_col] = pd.to_datetime(df_mfg[date_col], dayfirst=True, errors='coerce')
 
-    total_planned = df_mfg[plan_col].sum() if plan_col else 0
-    total_actual  = df_mfg[actual_col].sum() if actual_col else 0
+    total_planned = nc(df_mfg[plan_col]).sum() if plan_col else 0
+    total_actual  = nc(df_mfg[actual_col]).sum() if actual_col else 0
     efficiency    = (total_actual/total_planned*100) if total_planned > 0 else 0
-    total_defects = df_mfg[defect_col].sum() if defect_col else 0
+    total_defects = nc(df_mfg[defect_col]).sum() if defect_col else 0
     defect_rate   = (total_defects/total_actual*100) if total_actual > 0 else 0
-    total_downtime= df_mfg[down_col].sum() if down_col else 0
-    total_dt_cost = df_mfg[dcost_col].sum() if dcost_col else 0
-    total_cost    = (df_mfg[labour_col].sum() if labour_col else 0) + (df_mfg[material_col].sum() if material_col else 0)
+    total_downtime= nc(df_mfg[down_col]).sum() if down_col else 0
+    total_dt_cost = nc(df_mfg[dcost_col]).sum() if dcost_col else 0
+    total_cost    = (nc(df_mfg[labour_col]).sum() if labour_col else 0) + (nc(df_mfg[material_col]).sum() if material_col else 0)
 
     kpi_row([
         (f"{efficiency:.1f}%", "Production Efficiency", "green" if efficiency>=90 else "amber" if efficiency>=75 else "red", "Target: 90%+"),
@@ -2310,7 +2314,7 @@ if module == "Manufacturing":
                     plt.tight_layout(); st.pyplot(fig); plt.close()
             with col_b:
                 if dcause_col:
-                    cause_down = df_mfg[df_mfg[dcause_col].str.lower()!='none'].groupby(dcause_col)[down_col].sum().sort_values(ascending=False)
+                    cause_down = df_mfg[df_mfg[dcause_col].astype(str).str.lower()!='none'].groupby(dcause_col)[down_col].sum().sort_values(ascending=False)
                     if len(cause_down) > 0:
                         fig, ax = plt.subplots(figsize=(5,5))
                         clean_chart(fig, ax)
@@ -2374,10 +2378,10 @@ if module == "Manufacturing":
     with tab4:
         sh("💰","Cost Breakdown")
         cost_items = {}
-        if labour_col: cost_items['Labour'] = df_mfg[labour_col].sum()
-        if material_col: cost_items['Material'] = df_mfg[material_col].sum()
-        if dcost_col: cost_items['Downtime Loss'] = df_mfg[dcost_col].sum()
-        if energy_col: cost_items['Energy'] = df_mfg[energy_col].sum() * 8  # assume ₹8/kwh
+        if labour_col: cost_items['Labour'] = nc(df_mfg[labour_col]).sum()
+        if material_col: cost_items['Material'] = nc(df_mfg[material_col]).sum()
+        if dcost_col: cost_items['Downtime Loss'] = nc(df_mfg[dcost_col]).sum()
+        if energy_col: cost_items['Energy'] = nc(df_mfg[energy_col]).sum() * 8  # assume ₹8/kwh
 
         if cost_items:
             col_a, col_b = st.columns(2)
@@ -2428,13 +2432,13 @@ if module == "Marketing":
 
     if date_col: df_mkt[date_col] = pd.to_datetime(df_mkt[date_col], dayfirst=True, errors='coerce')
 
-    total_spend = df_mkt[spend_col].sum() if spend_col else 0
-    total_rev   = df_mkt[rev_col].sum() if rev_col else 0
-    total_leads = df_mkt[lead_col].sum() if lead_col else 0
-    total_conv  = df_mkt[conv_col].sum() if conv_col else 0
+    total_spend = nc(df_mkt[spend_col]).sum() if spend_col else 0
+    total_rev   = nc(df_mkt[rev_col]).sum() if rev_col else 0
+    total_leads = nc(df_mkt[lead_col]).sum() if lead_col else 0
+    total_conv  = nc(df_mkt[conv_col]).sum() if conv_col else 0
     overall_roas= round(total_rev/total_spend, 2) if total_spend > 0 else 0
     avg_cac     = round(total_spend/total_conv, 0) if total_conv > 0 else 0
-    ctr         = round(df_mkt[click_col].sum()/df_mkt[imp_col].sum()*100, 2) if click_col and imp_col else 0
+    ctr         = round(nc(df_mkt[click_col]).sum()/nc(df_mkt[imp_col]).sum()*100, 2) if click_col and imp_col else 0
     conv_rate   = round(total_conv/total_leads*100, 1) if total_leads > 0 else 0
 
     kpi_row([
@@ -2522,10 +2526,10 @@ if module == "Marketing":
         sh("🔄","Marketing Funnel")
         if imp_col and click_col and lead_col and conv_col:
             funnel_data = {
-                'Impressions': df_mkt[imp_col].sum(),
-                'Clicks': df_mkt[click_col].sum(),
-                'Leads': df_mkt[lead_col].sum(),
-                'Conversions': df_mkt[conv_col].sum(),
+                'Impressions': nc(df_mkt[imp_col]).sum(),
+                'Clicks': nc(df_mkt[click_col]).sum(),
+                'Leads': nc(df_mkt[lead_col]).sum(),
+                'Conversions': nc(df_mkt[conv_col]).sum(),
             }
             fig, ax = plt.subplots(figsize=(8,5))
             clean_chart(fig, ax)
@@ -2598,13 +2602,13 @@ if module == "Education":
         df_edu['Attendance %'] = (df_edu[present_col]/df_edu[total_s_col]*100).round(1)
 
     total_records = len(df_edu)
-    avg_score     = df_edu[score_col].mean() if score_col else 0
+    avg_score     = nc(df_edu[score_col]).mean() or 0 if score_col else 0
     avg_attend    = df_edu['Attendance %'].mean() if 'Attendance %' in df_edu.columns else 0
-    pass_rate     = (df_edu[pass_col].str.upper()=='YES').mean()*100 if pass_col else 0
-    total_fee     = df_edu[fee_col].sum() if fee_col else 0
-    total_paid    = df_edu[paid_col].sum() if paid_col else 0
+    pass_rate     = (df_edu[pass_col].astype(str).str.upper()=='YES').mean()*100 if pass_col else 0
+    total_fee     = nc(df_edu[fee_col]).sum() if fee_col else 0
+    total_paid    = nc(df_edu[paid_col]).sum() if paid_col else 0
     fee_collection= round(total_paid/total_fee*100, 1) if total_fee > 0 else 0
-    dropout_rate  = (df_edu[status_col].str.title()=='Dropped Out').mean()*100 if status_col else 0
+    dropout_rate  = (df_edu[status_col].astype(str).str.title()=='Dropped Out').mean()*100 if status_col else 0
 
     kpi_row([
         (f"{avg_score:.1f}%", "Avg Student Score", "green" if avg_score>=60 else "amber" if avg_score>=40 else "red", "Class average"),
@@ -2785,12 +2789,12 @@ if module == "Hospitality":
     if occ_col and total_r_col:
         df_hot['Occupancy %'] = (df_hot[occ_col]/df_hot[total_r_col]*100).round(1)
 
-    total_rev     = df_hot[rev_col].sum() if rev_col else 0
+    total_rev     = nc(df_hot[rev_col]).sum() if rev_col else 0
     avg_occ       = df_hot['Occupancy %'].mean() if 'Occupancy %' in df_hot.columns else 0
-    avg_rating    = df_hot[rating_col].mean() if rating_col else 0
-    cancel_rate   = (df_hot[cancel_col].str.upper()=='YES').mean()*100 if cancel_col else 0
-    avg_rate      = df_hot[rate_col].mean() if rate_col else 0
-    total_cost    = (df_hot[staff_col].sum() if staff_col else 0) + (df_hot[opcost_col].sum() if opcost_col else 0)
+    avg_rating    = nc(df_hot[rating_col]).mean() or 0 if rating_col else 0
+    cancel_rate   = (df_hot[cancel_col].astype(str).str.upper()=='YES').mean()*100 if cancel_col else 0
+    avg_rate      = nc(df_hot[rate_col]).mean() or 0 if rate_col else 0
+    total_cost    = (nc(df_hot[staff_col]).sum() if staff_col else 0) + (nc(df_hot[opcost_col]).sum() if opcost_col else 0)
     net_profit    = total_rev - total_cost
     revpar        = round(avg_rate * avg_occ/100, 0)  # Revenue per available room
 
@@ -2837,9 +2841,9 @@ if module == "Hospitality":
 
         if fnb_col and spa_col and rev_col:
             sh("🍽️","Revenue Breakdown")
-            room_rev = df_hot[rate_col].sum() if rate_col else 0
-            fnb_rev  = df_hot[fnb_col].sum()
-            spa_rev  = df_hot[spa_col].sum()
+            room_rev = nc(df_hot[rate_col]).sum() if rate_col else 0
+            fnb_rev  = nc(df_hot[fnb_col]).sum()
+            spa_rev  = nc(df_hot[spa_col]).sum()
             other_rev = total_rev - room_rev - fnb_rev - spa_rev
             rev_breakdown = {'Room Revenue': room_rev, 'F&B': fnb_rev, 'Spa': spa_rev}
             if other_rev > 0: rev_breakdown['Other'] = other_rev
@@ -2904,7 +2908,7 @@ if module == "Hospitality":
             (f"₹{net_profit:,.0f}", "Net Profit", "green" if net_profit>=0 else "red", f"{net_profit/total_rev*100:.1f}% margin" if total_rev>0 else None),
         ])
         if staff_col and opcost_col:
-            cost_breakdown = {'Staff Cost': df_hot[staff_col].sum(), 'Operating Cost': df_hot[opcost_col].sum()}
+            cost_breakdown = {'Staff Cost': nc(df_hot[staff_col]).sum(), 'Operating Cost': nc(df_hot[opcost_col]).sum()}
             fig, ax = plt.subplots(figsize=(6,4))
             clean_chart(fig, ax)
             ax.bar(list(cost_breakdown.keys()), list(cost_breakdown.values()), color=['#6366f1','#ef4444'], width=0.4)
@@ -2955,12 +2959,12 @@ if module == "Agriculture":
     if exp_yield_col and act_yield_col:
         df_agr['Yield Efficiency %'] = (df_agr[act_yield_col]/df_agr[exp_yield_col]*100).round(1)
 
-    total_rev    = df_agr[rev_col].sum() if rev_col else 0
-    total_cost   = df_agr[cost_col].sum() if cost_col else 0
-    total_profit = df_agr[profit_col].sum() if profit_col else total_rev - total_cost
+    total_rev    = nc(df_agr[rev_col]).sum() if rev_col else 0
+    total_cost   = nc(df_agr[cost_col]).sum() if cost_col else 0
+    total_profit = nc(df_agr[profit_col]).sum() if profit_col else total_rev - total_cost
     profit_margin= round(total_profit/total_rev*100,1) if total_rev > 0 else 0
     yield_eff    = df_agr['Yield Efficiency %'].mean() if 'Yield Efficiency %' in df_agr.columns else 0
-    total_area   = df_agr[area_col].sum() if area_col else 0
+    total_area   = nc(df_agr[area_col]).sum() if area_col else 0
     num_crops    = df_agr[crop_col].nunique() if crop_col else 0
 
     kpi_row([
@@ -3087,10 +3091,10 @@ if module == "Agriculture":
     with tab4:
         sh("🧪","Input Cost Breakdown")
         cost_items = {}
-        if seed_col: cost_items['Seeds'] = df_agr[seed_col].sum()
-        if fert_col: cost_items['Fertilizer'] = df_agr[fert_col].sum()
-        if labour_col: cost_items['Labour'] = df_agr[labour_col].sum()
-        if irrig_col: cost_items['Irrigation'] = df_agr[irrig_col].sum()
+        if seed_col: cost_items['Seeds'] = nc(df_agr[seed_col]).sum()
+        if fert_col: cost_items['Fertilizer'] = nc(df_agr[fert_col]).sum()
+        if labour_col: cost_items['Labour'] = nc(df_agr[labour_col]).sum()
+        if irrig_col: cost_items['Irrigation'] = nc(df_agr[irrig_col]).sum()
         if cost_items:
             col_a, col_b = st.columns(2)
             with col_a:
@@ -3147,14 +3151,14 @@ if module == "Construction":
     if plan_pct and act_pct:
         df_con['Progress Gap'] = df_con[plan_pct] - df_con[act_pct]
 
-    total_budget  = df_con[budget_col].sum() if budget_col else 0
-    total_actual  = df_con[actual_col].sum() if actual_col else 0
+    total_budget  = nc(df_con[budget_col]).sum() if budget_col else 0
+    total_actual  = nc(df_con[actual_col]).sum() if actual_col else 0
     cost_overrun  = total_actual - total_budget
     over_pct      = cost_overrun/total_budget*100 if total_budget > 0 else 0
     avg_progress  = df_con[act_pct].mean() if act_pct else 0
-    total_delay   = df_con[delay_col].sum() if delay_col else 0
-    total_incidents = df_con[incident_col].sum() if incident_col else 0
-    avg_quality   = df_con[quality_col].mean() if quality_col else 0
+    total_delay   = nc(df_con[delay_col]).sum() if delay_col else 0
+    total_incidents = nc(df_con[incident_col]).sum() if incident_col else 0
+    avg_quality   = nc(df_con[quality_col]).mean() or 0 if quality_col else 0
     num_projects  = df_con[proj_col].nunique() if proj_col else 0
 
     kpi_row([
@@ -3316,14 +3320,14 @@ if module == "Banking":
 
     if date_col: df_bnk[date_col] = pd.to_datetime(df_bnk[date_col], dayfirst=True, errors='coerce')
 
-    total_disbursed = df_bnk[amt_col].sum() if amt_col else 0
-    total_outstanding= df_bnk[out_col].sum() if out_col else 0
-    npa_count = (df_bnk[status_col].str.upper()=='NPA').sum() if status_col else 0
+    total_disbursed = nc(df_bnk[amt_col]).sum() if amt_col else 0
+    total_outstanding= nc(df_bnk[out_col]).sum() if out_col else 0
+    npa_count = (df_bnk[status_col].astype(str).str.upper()=='NPA').sum() if status_col else 0
     npa_rate  = npa_count/len(df_bnk)*100
-    npa_value = df_bnk[df_bnk[status_col].str.upper()=='NPA'][out_col].sum() if status_col and out_col else 0
-    avg_collect = df_bnk[collect_col].mean() if collect_col else 0
-    avg_rate  = df_bnk[rate_col].mean() if rate_col else 0
-    active_loans = (df_bnk[status_col].str.title()=='Active').sum() if status_col else len(df_bnk)
+    npa_value = df_bnk[df_bnk[status_col].astype(str).str.upper()=='NPA'][out_col].sum() if status_col and out_col else 0
+    avg_collect = nc(df_bnk[collect_col]).mean() or 0 if collect_col else 0
+    avg_rate  = nc(df_bnk[rate_col]).mean() or 0 if rate_col else 0
+    active_loans = (df_bnk[status_col].astype(str).str.title()=='Active').sum() if status_col else len(df_bnk)
 
     kpi_row([
         (f"₹{total_disbursed/1e6:.1f}M", "Total Disbursed", "indigo", f"{len(df_bnk):,} loans"),
@@ -3375,7 +3379,7 @@ if module == "Banking":
     with tab2:
         sh("⚠️","NPA Analysis")
         if status_col and out_col:
-            npa_df = df_bnk[df_bnk[status_col].str.upper()=='NPA'].copy()
+            npa_df = df_bnk[df_bnk[status_col].astype(str).str.upper()=='NPA'].copy()
             kpi_row([
                 (f"{len(npa_df)}", "NPA Accounts", "red", None),
                 (f"₹{npa_value:,.0f}", "NPA Outstanding", "red", "At risk"),
@@ -3407,7 +3411,7 @@ if module == "Banking":
             if out_col:
                 branch_stats.columns = ['Branch','Disbursed','Outstanding']
                 if status_col:
-                    branch_npa = df_bnk[df_bnk[status_col].str.upper()=='NPA'].groupby(branch_col).size().reset_index()
+                    branch_npa = df_bnk[df_bnk[status_col].astype(str).str.upper()=='NPA'].groupby(branch_col).size().reset_index()
                     branch_npa.columns = ['Branch','NPA Count']
                     branch_stats = branch_stats.merge(branch_npa, on='Branch', how='left').fillna(0)
                     branch_stats['NPA Count'] = branch_stats['NPA Count'].astype(int)
@@ -3431,7 +3435,7 @@ if module == "Banking":
             sh("👤","Agent Performance")
             agent_stats = df_bnk.groupby(agent_col).agg(Loans=(amt_col,'count'), Disbursed=(amt_col,'sum')).reset_index()
             if status_col:
-                agent_npa = df_bnk[df_bnk[status_col].str.upper()=='NPA'].groupby(agent_col).size().reset_index()
+                agent_npa = df_bnk[df_bnk[status_col].astype(str).str.upper()=='NPA'].groupby(agent_col).size().reset_index()
                 agent_npa.columns = [agent_col,'NPA Count']
                 agent_stats = agent_stats.merge(agent_npa, on=agent_col, how='left').fillna(0)
                 agent_stats['NPA Count'] = agent_stats['NPA Count'].astype(int)
@@ -3487,22 +3491,22 @@ with st.sidebar:
     df_s = df_clean.copy()
     if region_col:
         regions = ['All'] + sorted(df_clean[region_col].dropna().unique().tolist())
-        sr = st.selectbox("Region", regions)
+        sr = st.selectbox("Region", regions, key="sales_region")
         if sr != 'All': df_s = df_s[df_s[region_col] == sr]
     if cat_col:
         cats = ['All'] + sorted(df_clean[cat_col].dropna().unique().tolist())
-        sc = st.selectbox("Category", cats)
+        sc = st.selectbox("Category", cats, key="sales_cat")
         if sc != 'All': df_s = df_s[df_s[cat_col] == sc]
     if person_col:
         persons = ['All'] + sorted(df_clean[person_col].dropna().unique().tolist())
-        sp = st.selectbox("Salesperson", persons)
+        sp = st.selectbox("Salesperson", persons, key="sales_person")
         if sp != 'All': df_s = df_s[df_s[person_col] == sp]
     st.caption(f"**{len(df_s):,}** of **{len(df_clean):,}** rows")
 
 # KPIs
-total_rev    = df_s[rev_col].sum() if rev_col else 0
-total_qty    = df_s[qty_col].sum() if qty_col else 0
-total_target = df_s[target_col].sum() if target_col else 0
+total_rev    = nc(df_s[rev_col]).sum() if rev_col else 0
+total_qty    = nc(df_s[qty_col]).sum() if qty_col else 0
+total_target = nc(df_s[target_col]).sum() if target_col else 0
 achievement  = (total_rev / total_target * 100) if target_col and total_target > 0 else 0
 
 kpi_row([
@@ -3747,9 +3751,9 @@ with tab7:
         story.append(Spacer(1, 0.2*inch))
         story.append(Paragraph("Key Metrics", sec_style))
         metrics = [["Metric","Value"]]
-        if rev_col: metrics.append(["Total Revenue", f"₹{df_s[rev_col].sum():,.0f}"])
+        if rev_col: metrics.append(["Total Revenue", f"₹{nc(df_s[rev_col]).sum():,.0f}"])
         if target_col: metrics.append(["Target Achievement", f"{achievement:.1f}%"])
-        if qty_col: metrics.append(["Total Units Sold", f"{df_s[qty_col].sum():,.0f}"])
+        if qty_col: metrics.append(["Total Units Sold", f"{nc(df_s[qty_col]).sum():,.0f}"])
         if region_col: metrics.append(["Top Region", df_s.groupby(region_col)[rev_col].sum().idxmax()])
         if product_col: metrics.append(["Top Product", df_s.groupby(product_col)[rev_col].sum().idxmax()])
         metrics.append(["Records Analyzed", str(len(df_s))])
