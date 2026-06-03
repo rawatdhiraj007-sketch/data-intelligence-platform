@@ -282,13 +282,25 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
 .hero-stat-num { color: white; font-size: 1.6rem; font-weight: 800; }
 .hero-stat-label { color: #6b7280; font-size: 0.7rem; text-transform: uppercase; font-weight: 500; }
 
-/* Module pills */
-.module-nav { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
-.mod-pill { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 100px;
-    font-size: 0.82rem; font-weight: 600; cursor: pointer; border: 1.5px solid #e5e7eb;
-    background: white; color: #6b7280; transition: all 0.15s; white-space: nowrap; }
-.mod-pill.active { background: #6366f1; color: white; border-color: #6366f1; }
-.mod-pill.soon { opacity: 0.45; cursor: default; }
+/* Module selector — radio styled as pills */
+div[data-testid="stRadio"] > div { display: flex; flex-wrap: wrap; gap: 8px; }
+div[data-testid="stRadio"] label {
+    display: inline-flex !important; align-items: center; gap: 6px;
+    padding: 9px 18px !important; border-radius: 100px !important;
+    border: 1.5px solid #e5e7eb !important; background: white !important;
+    cursor: pointer; font-size: 0.83rem !important; font-weight: 600 !important;
+    color: #374151 !important; transition: all 0.15s; white-space: nowrap;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+div[data-testid="stRadio"] label:hover { border-color: #6366f1 !important; color: #6366f1 !important; background: #fafafa !important; }
+div[data-testid="stRadio"] label[data-checked="true"],
+div[data-testid="stRadio"] label[aria-checked="true"] {
+    background: #6366f1 !important; color: white !important;
+    border-color: #6366f1 !important; box-shadow: 0 2px 8px rgba(99,102,241,0.35) !important;
+}
+div[data-testid="stRadio"] [data-testid="stMarkdownContainer"] p { font-size: 0.83rem !important; font-weight: 600 !important; }
+div[data-testid="stRadio"] input[type="radio"] { display: none !important; }
+div[data-testid="stRadio"] > label { display: none; }
 
 /* Feature pills */
 .fpill { display:inline-block; background:#f1f5f9; color:#475569; border-radius:100px;
@@ -352,37 +364,38 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── MODULE SELECTOR ──────────────────────────────────────────────────────────
-MODULES = [
-    ("📈", "Sales Intelligence"),
-    ("📦", "Inventory Intelligence"),
-    ("👥", "HR & Payroll"),
-    ("💰", "Finance & Accounting"),
-    ("🛒", "Retail & E-commerce", True),
-    ("🚚", "Logistics", True),
-    ("🏥", "Healthcare", True),
-    ("🍽️", "Restaurant", True),
+LIVE_MODULES = [
+    "📈  Sales Intelligence",
+    "📦  Inventory Intelligence",
+    "👥  HR & Payroll",
+    "💰  Finance & Accounting",
 ]
+SOON_MODULES = ["🛒  Retail & E-commerce", "🚚  Logistics", "🏥  Healthcare", "🍽️  Restaurant"]
 
 if "module" not in st.session_state:
     st.session_state.module = "Sales Intelligence"
 
-cols = st.columns(len(MODULES))
-for i, mod in enumerate(MODULES):
-    soon = len(mod) == 3
-    label = mod[1]
-    icon = mod[0]
-    is_active = st.session_state.module == label
-    with cols[i]:
-        if not soon:
-            if st.button(f"{icon} {label}", key=f"mod_{i}",
-                         use_container_width=True,
-                         type="primary" if is_active else "secondary"):
-                st.session_state.module = label
-                st.rerun()
-        else:
-            st.button(f"{icon} {label} 🔜", key=f"mod_{i}", disabled=True, use_container_width=True)
+# Map display label → internal name
+def clean_module(label):
+    return label.split("  ", 1)[1] if "  " in label else label
 
-module = st.session_state.module
+module_choice = st.radio(
+    "module_selector",
+    LIVE_MODULES,
+    index=[clean_module(m) for m in LIVE_MODULES].index(st.session_state.module) if st.session_state.module in [clean_module(m) for m in LIVE_MODULES] else 0,
+    horizontal=True,
+    label_visibility="collapsed"
+)
+module = clean_module(module_choice)
+st.session_state.module = module
+
+# Show coming soon pills
+st.markdown(
+    "<div style='display:flex;gap:8px;flex-wrap:wrap;margin:-8px 0 12px;'>" +
+    "".join([f"<span style='display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:100px;border:1.5px dashed #d1d5db;background:#f9fafb;font-size:0.78rem;font-weight:600;color:#9ca3af;'>{m} <span style='background:#e5e7eb;color:#6b7280;font-size:0.62rem;font-weight:700;padding:1px 6px;border-radius:100px;'>SOON</span></span>" for m in SOON_MODULES]) +
+    "</div>",
+    unsafe_allow_html=True
+)
 
 st.markdown("""
 <div style='margin:12px 0 16px;'>
