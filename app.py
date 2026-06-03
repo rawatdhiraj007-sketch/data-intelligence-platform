@@ -240,11 +240,21 @@ def smart_clean(df_raw, filename=""):
     if missing_filled > 0:
         fixes.append(f"🔧 Filled {missing_filled} missing numeric value(s) with column median")
 
-    # ── 12. DETECT PERCENTAGE COLUMNS ───────────────────────────────────────
-    for col in df.select_dtypes(include='number').columns:
-        vals = df[col].dropna()
-        if len(vals) > 0 and vals.between(0, 100).mean() > 0.9 and 'pct' in col.lower() or '%' in col:
-            pass  # already fine as 0-100 scale
+    # ── 12. FINAL NUMERIC SAFETY PASS ───────────────────────────────────────
+    # Force-convert any object columns that are still storing numbers as strings
+    for col in df.select_dtypes(include='object').columns:
+        try:
+            sample = df[col].dropna().head(30)
+            if len(sample) == 0:
+                continue
+            cleaned = sample.astype(str).str.replace(r'[₹$€£,\s%\(\)]', '', regex=True)
+            if pd.to_numeric(cleaned, errors='coerce').notna().mean() >= 0.8:
+                df[col] = pd.to_numeric(
+                    df[col].astype(str).str.replace(r'[₹$€£,\s%]', '', regex=True),
+                    errors='coerce'
+                )
+        except Exception:
+            pass
 
     df.reset_index(drop=True, inplace=True)
     return df, fixes
